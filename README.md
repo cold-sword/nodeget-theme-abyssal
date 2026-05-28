@@ -2,6 +2,9 @@
 
 一款为 NodeGet 设计的深海幽蓝主题。
 
+> ⚠️ **要求 HTTPS**：本项目使用了 Secure Context API，必须通过 HTTPS 访问，HTTP 下页面白屏。
+> 部署时请配置 SSL 反向代理或使用 Vercel / Cloudflare Pages 自动 HTTPS。
+
 ## 演示站
 
 https://www.dmit.li
@@ -9,9 +12,11 @@ https://www.dmit.li
 ## Docker 部署
 
 [![Docker Pulls](https://img.shields.io/docker/pulls/coldsword/nodeget-theme-abyssal?logo=docker)](https://hub.docker.com/r/coldsword/nodeget-theme-abyssal)
+[![GHCR](https://img.shields.io/badge/ghcr-packages-blue?logo=github)](https://github.com/cold-sword/nodeget-theme-abyssal/pkgs/container/nodeget-theme-abyssal)
 
-支持 `linux/amd64` 和 `linux/arm64`，镜像随 main 分支自动构建推送。
+支持 `linux/amd64` 和 `linux/arm64`，同时推送 DockerHub 和 GitHub Container Registry。
 
+> ⚠️ **必须通过 HTTPS 访问**。
 ### docker-compose.yml
 
 ```yaml

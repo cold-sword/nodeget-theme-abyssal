@@ -3,17 +3,19 @@ name: Build & Push Docker Image
 on:
   push:
     branches: [main]
+    tags: ['v*']
     paths-ignore:
       - 'README.md'
       - 'LICENSE'
       - '.github/workflows/sync-upstream.yml'
       - 'docs/**'
   schedule:
-    - cron: '0 2 * * *'   # UTC 02:00 daily, after sync-upstream (UTC 00:00)
+    - cron: '0 2 * * *'
   workflow_dispatch:
 
 permissions:
   contents: read
+  packages: write
 
 jobs:
   # ── 1. 各平台原生构建 ──────────────────────────────────
@@ -35,6 +37,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Short SHA
+        id: sha
+        run: echo "value=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -44,14 +50,12 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Docker meta
-        id: meta
-        uses: docker/metadata-action@v5
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
         with:
-          images: coldsword/nodeget-theme-abyssal
-          tags: |
-            type=sha,prefix=,format=short
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push
         uses: docker/build-push-action@v6
@@ -60,8 +64,8 @@ jobs:
           platforms: ${{ matrix.platform }}
           push: true
           tags: |
-            coldsword/nodeget-theme-abyssal:${{ steps.meta.outputs.version }}-${{ matrix.suffix }}
-            coldsword/nodeget-theme-abyssal:${{ matrix.suffix }}
+            coldsword/nodeget-theme-abyssal:${{ steps.sha.outputs.value }}-${{ matrix.suffix }}
+            ghcr.io/${{ github.repository_owner }}/nodeget-theme-abyssal:${{ steps.sha.outputs.value }}-${{ matrix.suffix }}
 
   # ── 2. 合并多架构 manifest ────────────────────────────
   merge:
@@ -69,6 +73,13 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Short SHA
+        id: sha
+        run: echo "value=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -78,21 +89,45 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Docker meta
-        id: meta
-        uses: docker/metadata-action@v5
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
         with:
-          images: coldsword/nodeget-theme-abyssal
-          tags: |
-            type=sha,prefix=,format=short
-            type=raw,value=latest
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Merge manifest
+      - name: Merge manifests (DockerHub)
         run: |
           IMAGE="coldsword/nodeget-theme-abyssal"
-          TAG="${{ steps.meta.outputs.version }}"
+          SHA="${{ steps.sha.outputs.value }}"
+          VERSION=""
+
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/v}"
+          fi
+
+          TAGS="-t ${IMAGE}:latest -t ${IMAGE}:${SHA}"
+          [ -n "$VERSION" ] && TAGS="$TAGS -t ${IMAGE}:${VERSION}"
+
           docker buildx imagetools create \
-            -t ${IMAGE}:latest \
-            -t ${IMAGE}:${TAG} \
-            ${IMAGE}:${TAG}-amd64 \
-            ${IMAGE}:${TAG}-arm64
+            $TAGS \
+            ${IMAGE}:${SHA}-amd64 \
+            ${IMAGE}:${SHA}-arm64
+
+      - name: Merge manifests (GHCR)
+        run: |
+          IMAGE="ghcr.io/${{ github.repository_owner }}/nodeget-theme-abyssal"
+          SHA="${{ steps.sha.outputs.value }}"
+          VERSION=""
+
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/v}"
+          fi
+
+          TAGS="-t ${IMAGE}:latest -t ${IMAGE}:${SHA}"
+          [ -n "$VERSION" ] && TAGS="$TAGS -t ${IMAGE}:${VERSION}"
+
+          docker buildx imagetools create \
+            $TAGS \
+            ${IMAGE}:${SHA}-amd64 \
+            ${IMAGE}:${SHA}-arm64
