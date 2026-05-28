@@ -1,0 +1,69 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v1.4.3)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install & Build
+        run: |
+          npm ci
+          npm run build
+
+      - name: Package dist
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          ZIP="nodeget-theme-abyssal-v${VERSION}.zip"
+          cd dist
+          zip -r "../${ZIP}" .
+          cd ..
+          echo "zip=${ZIP}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+        id: package
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name || inputs.tag }}
+          name: v${{ steps.package.outputs.version }} - Abyssal Theme
+          body: |
+            ## NodeGet Abyssal Theme v${{ steps.package.outputs.version }}
+
+            深海幽蓝主题静态构建产物，可直接部署到任意静态文件服务。
+
+            ### 部署方式
+
+            1. 下载 `nodeget-theme-abyssal-v${{ steps.package.outputs.version }}.zip`
+            2. 解压后修改 `config.json` 中的 `site_tokens`
+            3. 上传到 Nginx / Cloudflare Pages / Vercel 等静态服务
+
+            ### Docker
+
+            ```bash
+            docker pull coldsword/nodeget-theme-abyssal:latest
+            ```
+
+            详见 [README](https://github.com/cold-sword/nodeget-theme-abyssal#readme)
+          files: ${{ steps.package.outputs.zip }}
+          generate_release_notes: true
