@@ -6,6 +6,57 @@
 
 https://www.dmit.li
 
+## Docker 部署
+
+[![Docker Pulls](https://img.shields.io/docker/pulls/coldsword/nodeget-theme-abyssal?logo=docker)](https://hub.docker.com/r/coldsword/nodeget-theme-abyssal)
+
+支持 `linux/amd64` 和 `linux/arm64`，镜像随 main 分支自动构建推送。
+
+### docker-compose.yml
+
+```yaml
+services:
+  nodeget-abyssal:
+    image: coldsword/nodeget-theme-abyssal:latest
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    env_file:
+      - .env
+```
+
+### .env
+
+```dotenv
+SITE_NAME=Abyssal Status
+SITE_LOGO=
+SITE_FOOTER=Powered by NodeGet
+SITE_1=name="主节点",backend_url="wss://your-server.example.com",token="***"
+```
+
+多节点追加 `SITE_2`、`SITE_3` 即可：
+
+```dotenv
+SITE_1=name="Node 1",backend_url="wss://node1.example.com",token="***"
+SITE_2=name="Node 2",backend_url="wss://node2.example.com",token="***"
+```
+
+### 启动
+
+```bash
+docker compose up -d
+```
+
+修改 `.env` 后重启生效，无需重新构建镜像：
+
+```bash
+docker compose restart
+```
+
+> 也支持 `NODEGET_CONFIG` 环境变量传入完整 JSON。修改配置只需重启容器，不用重新 build。
+
+---
+
 ## 一键部署到 Vercel / Cloudflare Pages
 
 Fork 本仓库，然后点击下方按钮一键部署。
