@@ -1,0 +1,124 @@
+name: Sync Upstream
+
+on:
+  schedule:
+    - cron: '0 0 * * *'   # 每天 UTC 00:00
+  workflow_dispatch:        # 手动触发
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Add upstream remotes
+        run: |
+          git remote add statusshow https://github.com/NodeSeekDev/NodeGet-StatusShow.git || true
+          git remote add theme-abyssal https://github.com/clavulin/nodeget-theme-abyssal.git || true
+
+      - name: Fetch upstreams
+        run: |
+          git fetch statusshow main
+          git fetch theme-abyssal main
+
+      - name: Create sync branch
+        run: |
+          git checkout -b sync/upstream-updates
+
+      - name: Merge StatusShow upstream
+        id: merge-statusshow
+        run: |
+          # --allow-unrelated-histories for first merge; subsequent merges work normally
+          # -X ours: auto-resolve conflicts favoring our theme customizations
+          if git merge statusshow/main --allow-unrelated-histories \
+               -X ours --no-edit 2>&1 | tee /tmp/merge.log; then
+            echo "merged=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "merged=false" >> "$GITHUB_OUTPUT"
+            echo "merge_failed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Resolve merge conflicts (if any)
+        if: steps.merge-statusshow.outputs.merge_failed == 'true'
+        run: |
+          # Keep our versions for theme-critical files
+          for f in package.json nodeget-theme.json vercel.json public/custom.css public/custom.js public/logo.png .gitignore .env.example; do
+            if git ls-files -u | grep -q "$f"; then
+              git checkout --ours "$f" 2>/dev/null && git add "$f" 2>/dev/null || true
+            fi
+          done
+          # Take upstream for everything else
+          git ls-files -u | awk '{print $4}' | sort -u | while read f; do
+            git checkout --theirs "$f" 2>/dev/null && git add "$f" 2>/dev/null || true
+          done
+          git commit --no-edit 2>/dev/null || true
+
+      - name: Sync theme-abyssal public files
+        run: |
+          # Only copy files that actually changed in upstream theme
+          CHANGED=$(git diff --name-only HEAD theme-abyssal/main -- public/ nodeget-theme.json 2>/dev/null || true)
+          if [ -n "$CHANGED" ]; then
+            echo "Theme files changed:"
+            echo "$CHANGED"
+            git checkout theme-abyssal/main -- public/custom.css public/custom.js public/logo.png 2>/dev/null || true
+            if [ -d "$(git -C /tmp show theme-abyssal/main:public/assets 2>/dev/null)" ]; then
+              git checkout theme-abyssal/main -- public/assets/ 2>/dev/null || true
+            fi
+            git checkout theme-abyssal/main -- nodeget-theme.json 2>/dev/null || true
+            echo "theme_updated=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "theme_updated=false" >> "$GITHUB_OUTPUT"
+            echo "No theme file changes"
+          fi
+
+      - name: Check for changes
+        id: check-changes
+        run: |
+          if git diff --quiet origin/main; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No changes detected, skipping PR"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Push sync branch
+        if: steps.check-changes.outputs.changed == 'true'
+        run: |
+          git push origin sync/upstream-updates --force
+
+      - name: Create Pull Request
+        if: steps.check-changes.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: sync/upstream-updates
+          base: main
+          title: '🔄 [Auto] Sync upstream updates'
+          body: |
+            ## 自动同步上游更新
+
+            检测到以下上游有更新：
+
+            - **[NodeSeekDev/NodeGet-StatusShow](https://github.com/NodeSeekDev/NodeGet-StatusShow)** — 主应用源码更新
+            - **[clavulin/nodeget-theme-abyssal](https://github.com/clavulin/nodeget-theme-abyssal)** — 主题文件更新
+
+            ### 合并策略
+
+            - StatusShow 冲突文件：保留本仓库版本（`package.json`、`vercel.json`、主题文件）
+            - 主题 public/ 文件：从 abyssal 上游同步
+            - 其他冲突：以上游为准
+
+            请 review 后合并。Vercel 会在合并后自动重新部署。
+          labels: 'upstream-sync'
+          delete-branch: true
