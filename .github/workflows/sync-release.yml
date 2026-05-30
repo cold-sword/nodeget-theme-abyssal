@@ -1,5 +1,8 @@
 name: Sync Release from Upstream
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 on:
   schedule:
     - cron: '30 0 * * *'   # UTC 00:30 — 每天 sync-upstream (00:00) 之后 30 分钟
