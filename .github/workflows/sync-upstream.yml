@@ -72,9 +72,7 @@ jobs:
             echo "Theme files changed:"
             echo "$CHANGED"
             git checkout theme-abyssal/main -- public/custom.css public/custom.js public/logo.png 2>/dev/null || true
-            if [ -d "$(git -C /tmp show theme-abyssal/main:public/assets 2>/dev/null)" ]; then
-              git checkout theme-abyssal/main -- public/assets/ 2>/dev/null || true
-            fi
+            git checkout theme-abyssal/main -- public/assets/ 2>/dev/null || true
             git checkout theme-abyssal/main -- nodeget-theme.json 2>/dev/null || true
             echo "theme_updated=true" >> "$GITHUB_OUTPUT"
           else
