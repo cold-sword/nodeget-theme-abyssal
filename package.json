@@ -3,10 +3,45 @@
   "version": "1.4.3",
   "private": true,
   "type": "module",
+  "license": "AGPL-3.0-only",
   "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "postbuild": "node scripts/build-template-config.mjs && node scripts/build-config.mjs",
+    "preview": "vite preview",
+    "typecheck": "tsc -p tsconfig.json",
     "build:release": "node scripts/build-release.mjs",
     "verify:package": "node scripts/verify-theme-package.mjs",
     "verify:package:strict": "NODEGET_THEME_STRICT_ASSET_LICENSES=1 node scripts/verify-theme-package.mjs"
   },
-  "license": "AGPL-3.0-only"
+  "dependencies": {
+    "@radix-ui/react-progress": "^1.1.0",
+    "@radix-ui/react-slot": "^1.1.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "echarts": "^5.6.0",
+    "lucide-react": "^0.460.0",
+    "pretty-bytes": "^6.1.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "recharts": "^2.13.3",
+    "tailwind-merge": "^2.5.4",
+    "tailwindcss-animate": "^1.0.7"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "@types/react": "^18.3.28",
+    "@types/react-dom": "^18.3.7",
+    "@vitejs/plugin-react": "^6.0.1",
+    "archiver": "^8.0.0",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.15",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.10"
+  },
+  "overrides": {
+    "uuid": "^14.0.0",
+    "d3-color": "^3.1.0"
+  }
 }
