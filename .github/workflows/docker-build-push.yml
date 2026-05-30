@@ -175,6 +175,8 @@ jobs:
     needs: merge
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
       - name: Remove platform-specific intermediate tags
         run: |
           SHA="$(git rev-parse --short HEAD)"
