@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import vm from 'node:vm'
@@ -226,6 +226,12 @@ test('critical custom.js patch-layer markers remain present', () => {
     'download\\.html',
     '提取当前主题',
     '升级到',
+    // Extension seam: deployments that rewrite flag <img> sources register
+    // matchers here so the theme stays agnostic to any specific proxy route.
+    'NODEGET_FLAG_MATCHERS',
+    // Extension seam: deployments with stricter backend query limits override
+    // the latency row cap here, so the private value stays out of the theme.
+    'NODEGET_LATENCY_QUERY_LIMIT',
   ]
 
   for (const marker of requiredJsMarkers) {
@@ -241,6 +247,10 @@ test('private server-order and provider filter code stays out of public patch', 
     'nodeget-server_list_all_agent_uuid',
     'nodeget-provider-filter',
     'providerChipHtml',
+    // Deployment-specific proxy routes must not be hard-coded here; the theme
+    // matches flags via the NODEGET_FLAG_MATCHERS seam, so this literal route
+    // must never leak back into custom.js.
+    '/flag/',
   ]) {
     assert.equal(customJs.includes(marker), false, `custom.js must not contain private marker: ${marker}`)
   }
@@ -316,6 +326,9 @@ test('latency timing constants', () => {
   assert.match(customJs, /LATENCY_WINDOW_MS\s*=\s*24 \* 60 \* 60 \* 1000/)
   assert.match(customJs, /LATENCY_BUCKET_MS\s*=\s*5 \* 60 \* 1000/)
   assert.match(customJs, /LATENCY_REFRESH_FLOOR_MS\s*=\s*60 \* 1000/)
+  // Public default must stay generic; a stricter per-deployment cap belongs in
+  // window.NODEGET_LATENCY_QUERY_LIMIT, not hard-coded into the theme.
+  assert.match(customJs, /LATENCY_QUERY_LIMIT_DEFAULT\s*=\s*20000/)
 })
 
 test('latency parser accepts ping task_query with uuid, id, and timestamp window', () => {
@@ -610,4 +623,49 @@ test('light-mode detail divider CSS marker', () => {
 
 test('detail latency chart tooltip CSS marker', () => {
   assert.match(customCss, /Detail latency chart tooltips/)
+})
+
+test('veil backgrounds use image-set() with AVIF/WebP and PNG fallback', () => {
+  // Modern declaration: AVIF + WebP via image-set(), e.g. veil-top.
+  assert.match(
+    customCss,
+    /image-set\(url\("\.\/assets\/veil-top\.avif"\) type\("image\/avif"\), url\("\.\/assets\/veil-top\.webp"\) type\("image\/webp"\), url\("\.\/assets\/veil-top\.png"\)\)/,
+  )
+  // Legacy PNG fallback declaration must remain so pre-image-set() browsers still render.
+  assert.match(customCss, /Legacy PNG-only fallback/)
+  // The veil PNG references must still exist (used by the fallback block AND as the
+  // final entry inside each image-set()).
+  for (const variant of [
+    'veil-top',
+    'veil-mid',
+    'veil-deep',
+    'veil-top-r90',
+    'veil-top-r180',
+    'veil-mid-r180',
+    'veil-mid-flipx',
+    'veil-deep-r180',
+    'veil-deep-flipx',
+  ]) {
+    assert.ok(customCss.includes(`url("./assets/${variant}.png")`), `custom.css should reference ${variant}.png`)
+  }
+})
+
+test('background asset variants exist on disk for image-set fallbacks', () => {
+  const assetsDir = resolve(__dirname, '../public/assets')
+  const required = [
+    'specks.avif', 'specks.webp', 'specks.png',
+    'veil-top.avif', 'veil-top.webp', 'veil-top.png',
+    'veil-mid.avif', 'veil-mid.webp', 'veil-mid.png',
+    'veil-deep.avif', 'veil-deep.webp', 'veil-deep.png',
+    'veil-top-r90.avif', 'veil-top-r90.webp', 'veil-top-r90.png',
+    'veil-top-r180.avif', 'veil-top-r180.webp', 'veil-top-r180.png',
+    'veil-mid-r180.avif', 'veil-mid-r180.webp', 'veil-mid-r180.png',
+    'veil-mid-flipx.avif', 'veil-mid-flipx.webp', 'veil-mid-flipx.png',
+    'veil-deep-r180.avif', 'veil-deep-r180.webp', 'veil-deep-r180.png',
+    'veil-deep-flipx.avif', 'veil-deep-flipx.webp', 'veil-deep-flipx.png',
+  ]
+  for (const name of required) {
+    const path = resolve(assetsDir, name)
+    assert.ok(existsSync(path), `expected asset variant present: public/assets/${name}`)
+  }
 })

@@ -169,6 +169,7 @@ html.nodeget-abyssal-theme {
 html.nodeget-abyssal-theme body {
   min-height: 100vh;
   background-color: #020f0f;
+  /* Legacy PNG-only fallback for browsers without CSS image-set() (pre-2022 Safari, etc.). */
   background-image:
     linear-gradient(var(--nodeget-archive-grain-wash), var(--nodeget-archive-grain-wash)),
     url("./assets/grain.png"),
@@ -178,6 +179,18 @@ html.nodeget-abyssal-theme body {
     radial-gradient(circle at 62% 26%, rgba(255, 230, 203, 0.04), transparent 32rem),
     url("./assets/veil-mid.png"),
     url("./assets/veil-deep.png"),
+    linear-gradient(180deg, rgba(2, 15, 15, 0.38), rgba(4, 28, 28, 0.72)),
+    linear-gradient(90deg, rgba(2, 15, 15, 0.68), rgba(4, 28, 28, 0.16) 52%, rgba(2, 15, 15, 0.86));
+  /* Modern AVIF/WebP via image-set(); overrides the PNG declaration when supported. */
+  background-image:
+    linear-gradient(var(--nodeget-archive-grain-wash), var(--nodeget-archive-grain-wash)),
+    url("./assets/grain.png"),
+    image-set(url("./assets/specks.avif") type("image/avif"), url("./assets/specks.webp") type("image/webp"), url("./assets/specks.png")),
+    linear-gradient(90deg, rgba(2, 15, 15, 0.14), rgba(4, 28, 28, 0.06) 48%, rgba(2, 15, 15, 0.12)),
+    image-set(url("./assets/veil-top.avif") type("image/avif"), url("./assets/veil-top.webp") type("image/webp"), url("./assets/veil-top.png")),
+    radial-gradient(circle at 62% 26%, rgba(255, 230, 203, 0.04), transparent 32rem),
+    image-set(url("./assets/veil-mid.avif") type("image/avif"), url("./assets/veil-mid.webp") type("image/webp"), url("./assets/veil-mid.png")),
+    image-set(url("./assets/veil-deep.avif") type("image/avif"), url("./assets/veil-deep.webp") type("image/webp"), url("./assets/veil-deep.png")),
     linear-gradient(180deg, rgba(2, 15, 15, 0.38), rgba(4, 28, 28, 0.72)),
     linear-gradient(90deg, rgba(2, 15, 15, 0.68), rgba(4, 28, 28, 0.16) 52%, rgba(2, 15, 15, 0.86));
   background-position: center, left top, left top, center, calc(100% + 1rem) 5rem, 62% 26%, -5rem 52rem, calc(100% + 2rem) 98rem, center top, center;
@@ -607,6 +620,7 @@ html.nodeget-abyssal-theme .nodeget-archive-card {
   position: relative;
   color: inherit;
   text-decoration: none;
+  min-height: 17.25rem;
 }
 
 html.nodeget-abyssal-theme .nodeget-archive-card::before {
@@ -729,6 +743,7 @@ html.nodeget-abyssal-theme .nodeget-archive-card > div > div:nth-child(3) > div 
   position: relative;
   display: grid;
   gap: 0.18rem;
+  min-height: 2.35rem;
   padding-block: 0.18rem;
   padding-left: 0.72rem;
   border-top: 0 !important;
@@ -1412,6 +1427,7 @@ html.nodeget-abyssal-theme *::-webkit-scrollbar-thumb {
   }
 
   html.nodeget-abyssal-theme body {
+    /* Legacy PNG-only fallback. */
     background-image:
       linear-gradient(var(--nodeget-archive-grain-wash), var(--nodeget-archive-grain-wash)),
       url("./assets/grain.png"),
@@ -1435,6 +1451,32 @@ html.nodeget-abyssal-theme *::-webkit-scrollbar-thumb {
       url("./assets/veil-deep.png"),
       url("./assets/veil-mid-flipx.png"),
       url("./assets/veil-top-r180.png"),
+      linear-gradient(180deg, rgba(2, 15, 15, 0.5), rgba(4, 28, 28, 0.67)),
+      linear-gradient(90deg, rgba(2, 15, 15, 0.75), rgba(4, 28, 28, 0.16) 56%, rgba(2, 15, 15, 0.82));
+    /* Modern AVIF/WebP via image-set(); overrides the PNG declaration when supported. */
+    background-image:
+      linear-gradient(var(--nodeget-archive-grain-wash), var(--nodeget-archive-grain-wash)),
+      url("./assets/grain.png"),
+      image-set(url("./assets/specks.avif") type("image/avif"), url("./assets/specks.webp") type("image/webp"), url("./assets/specks.png")),
+      linear-gradient(90deg, rgba(2, 15, 15, 0.1), rgba(4, 28, 28, 0.03) 50%, rgba(2, 15, 15, 0.09)),
+      image-set(url("./assets/veil-top.avif") type("image/avif"), url("./assets/veil-top.webp") type("image/webp"), url("./assets/veil-top.png")),
+      radial-gradient(circle at 56% 18%, rgba(255, 230, 203, 0.022), transparent 17rem),
+      image-set(url("./assets/veil-mid-r180.avif") type("image/avif"), url("./assets/veil-mid-r180.webp") type("image/webp"), url("./assets/veil-mid-r180.png")),
+      image-set(url("./assets/veil-top-r90.avif") type("image/avif"), url("./assets/veil-top-r90.webp") type("image/webp"), url("./assets/veil-top-r90.png")),
+      image-set(url("./assets/veil-mid.avif") type("image/avif"), url("./assets/veil-mid.webp") type("image/webp"), url("./assets/veil-mid.png")),
+      image-set(url("./assets/veil-deep-flipx.avif") type("image/avif"), url("./assets/veil-deep-flipx.webp") type("image/webp"), url("./assets/veil-deep-flipx.png")),
+      image-set(url("./assets/veil-mid-flipx.avif") type("image/avif"), url("./assets/veil-mid-flipx.webp") type("image/webp"), url("./assets/veil-mid-flipx.png")),
+      image-set(url("./assets/veil-top.avif") type("image/avif"), url("./assets/veil-top.webp") type("image/webp"), url("./assets/veil-top.png")),
+      image-set(url("./assets/veil-mid-r180.avif") type("image/avif"), url("./assets/veil-mid-r180.webp") type("image/webp"), url("./assets/veil-mid-r180.png")),
+      image-set(url("./assets/veil-deep-r180.avif") type("image/avif"), url("./assets/veil-deep-r180.webp") type("image/webp"), url("./assets/veil-deep-r180.png")),
+      image-set(url("./assets/veil-top-r180.avif") type("image/avif"), url("./assets/veil-top-r180.webp") type("image/webp"), url("./assets/veil-top-r180.png")),
+      image-set(url("./assets/veil-mid.avif") type("image/avif"), url("./assets/veil-mid.webp") type("image/webp"), url("./assets/veil-mid.png")),
+      image-set(url("./assets/veil-deep-flipx.avif") type("image/avif"), url("./assets/veil-deep-flipx.webp") type("image/webp"), url("./assets/veil-deep-flipx.png")),
+      image-set(url("./assets/veil-mid-r180.avif") type("image/avif"), url("./assets/veil-mid-r180.webp") type("image/webp"), url("./assets/veil-mid-r180.png")),
+      image-set(url("./assets/veil-top-r90.avif") type("image/avif"), url("./assets/veil-top-r90.webp") type("image/webp"), url("./assets/veil-top-r90.png")),
+      image-set(url("./assets/veil-deep.avif") type("image/avif"), url("./assets/veil-deep.webp") type("image/webp"), url("./assets/veil-deep.png")),
+      image-set(url("./assets/veil-mid-flipx.avif") type("image/avif"), url("./assets/veil-mid-flipx.webp") type("image/webp"), url("./assets/veil-mid-flipx.png")),
+      image-set(url("./assets/veil-top-r180.avif") type("image/avif"), url("./assets/veil-top-r180.webp") type("image/webp"), url("./assets/veil-top-r180.png")),
       linear-gradient(180deg, rgba(2, 15, 15, 0.5), rgba(4, 28, 28, 0.67)),
       linear-gradient(90deg, rgba(2, 15, 15, 0.75), rgba(4, 28, 28, 0.16) 56%, rgba(2, 15, 15, 0.82));
     background-position: center, left top, left top, center, calc(100% + 12rem) 2rem, 56% 18%, -9rem 30rem, 44% 58rem, calc(100% + 10rem) 88rem, -10rem 118rem, 50% 148rem, calc(100% + 11rem) 178rem, -8rem 210rem, 54% 242rem, calc(100% + 12rem) 274rem, -9rem 306rem, 48% 340rem, calc(100% + 12rem) 374rem, -8rem 410rem, 55% 446rem, calc(100% + 12rem) 482rem, -9rem 520rem, center top, center;
@@ -3158,8 +3200,25 @@ html.nodeget-abyssal-theme .nodeget-topbar-actions {
 }
 
 @media (max-width: 639px) {
+  html.nodeget-abyssal-theme header > div:first-child {
+    min-height: 3.04rem !important;
+    align-items: center !important;
+  }
+
+  html.nodeget-abyssal-theme .nodeget-topbar-actions {
+    min-height: 2.58rem !important;
+    flex-wrap: nowrap !important;
+    align-items: center !important;
+  }
+
   html.nodeget-abyssal-theme .nodeget-topbar-actions > *:first-child {
     display: none !important;
+  }
+
+  html.nodeget-abyssal-theme .nodeget-topbar-actions > button,
+  html.nodeget-abyssal-theme header .relative.inline-grid {
+    min-height: 2.02rem !important;
+    flex: 0 0 auto !important;
   }
 
   html.nodeget-abyssal-theme .nodeget-topbar-actions > button[aria-label="SEARCH"],
@@ -3167,6 +3226,23 @@ html.nodeget-abyssal-theme .nodeget-topbar-actions {
   html.nodeget-abyssal-theme .nodeget-topbar-actions > button[aria-label="CLOSE SEARCH"],
   html.nodeget-abyssal-theme .nodeget-topbar-actions > button[aria-label="关闭搜索"] {
     display: inline-flex !important;
+  }
+
+  html.nodeget-abyssal-theme main > .flex.flex-wrap {
+    min-height: 2.5rem !important;
+    align-items: center !important;
+  }
+
+  html.nodeget-abyssal-theme .nodeget-archive-card {
+    min-height: 13.5rem !important;
+  }
+
+  html.nodeget-abyssal-theme .nodeget-card-header {
+    min-height: 2.4rem !important;
+  }
+
+  html.nodeget-abyssal-theme .nodeget-card-metric-grid {
+    min-height: 5.35rem !important;
   }
 }
 
