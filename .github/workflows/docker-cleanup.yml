@@ -30,96 +30,59 @@ jobs:
       - name: Cleanup DockerHub tags
         run: |
           IMAGE="coldsword/nodeget-theme-abyssal"
-          KEEP_SHA=10        # 保留最近 N 个纯 SHA tag
-          KEEP_DEV=5         # 保留最近 N 个 version-sha tag
-          KEEP_NIGHTLY=3     # 保留最近 N 个 nightly tag
 
-          # 获取所有 tags
+          # 获取所有 tags 并按时间排序
           ALL_TAGS=$(curl -s -H "Authorization: JWT $TOKEN" \
             "https://hub.docker.com/v2/repositories/${IMAGE}/tags/?page_size=100" | \
-            jq -r '.results[] | "\(.name)\t\(.last_updated)"')
+            jq -r '.results[] | "\(.name)\t\(.last_updated)"' | sort -t$'\t' -k2 -r)
 
-          # 按时间排序，分类
-          echo "$ALL_TAGS" | sort -t$'\t' -k2 -r > /tmp/all_tags.txt
+          echo "$ALL_TAGS" > /tmp/all_tags.txt
 
-          SHA_TAGS=()
-          DEV_TAGS=()
-          NIGHTLY_TAGS=()
+          # 只保留: latest + 发布版本号(如1.4.3) + 最新的 version-sha(如1.4.3-xxx)
+          # 其余全部删除
+          KEEP_NOW=true   # 标记"下一个 version-sha 保留"
           TO_DELETE=()
 
           while IFS=$'\t' read -r name updated; do
+            [ -z "$name" ] && continue
+
             case "$name" in
               latest)
-                echo "  📌 KEEP $name (latest)"
-                continue
-                ;;
-              "")
+                echo "  📌 KEEP latest"
                 continue
                 ;;
             esac
 
+            # 纯净版本号 (如 1.4.3) — 永久保留
             if echo "$name" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-              echo "  🏷  KEEP $name (release tag)"
+              echo "  🏷  KEEP $name (release)"
               continue
-            elif echo "$name" | grep -qE '^[0-9a-f]{7,}$'; then
-              SHA_TAGS+=("$name")
-            elif echo "$name" | grep -qE '^nightly-'; then
-              NIGHTLY_TAGS+=("$name")
-            elif echo "$name" | grep -qE '\-(amd64|arm64)$'; then
-              TO_DELETE+=("$name")   # 平台特定 tag，总删除
-            elif echo "$name" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+-'; then
-              DEV_TAGS+=("$name")    # version-sha (dev build)
-            else
-              echo "  ❓ SKIP $name (unknown pattern)"
             fi
+
+            # 最新的 version-sha (如 1.4.3-abc1234) — 保留一个
+            if echo "$name" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+-[0-9a-f]{7,}$'; then
+              if [ "$KEEP_NOW" = "true" ]; then
+                echo "  🔖 KEEP $name (latest dev build)"
+                KEEP_NOW=false
+                continue
+              fi
+            fi
+
+            # 其余一律删除
+            TO_DELETE+=("$name")
           done < /tmp/all_tags.txt
 
           echo ""
-          echo "=== Cleanup Plan ==="
-          echo "SHA tags total: ${#SHA_TAGS[@]} → keep $KEEP_SHA"
-          echo "Dev tags total: ${#DEV_TAGS[@]} → keep $KEEP_DEV"
-          echo "Nightly tags total: ${#NIGHTLY_TAGS[@]} → keep $KEEP_NIGHTLY"
-          echo "Platform tags to delete: ${#TO_DELETE[@]}"
-          echo ""
-
-          # 删除旧的 SHA tags
-          DELETE_SHA=$(( ${#SHA_TAGS[@]} - KEEP_SHA ))
-          if [ $DELETE_SHA -gt 0 ]; then
-            echo "Deleting $DELETE_SHA old SHA tags..."
-            for ((i=KEEP_SHA; i<${#SHA_TAGS[@]}; i++)); do
-              echo "  ❌ ${SHA_TAGS[$i]}"
-              curl -s -X DELETE -H "Authorization: JWT $TOKEN" \
-                "https://hub.docker.com/v2/repositories/${IMAGE}/tags/${SHA_TAGS[$i]}/" > /dev/null
-            done
-          fi
-
-          # 删除旧的 dev tags
-          DELETE_DEV=$(( ${#DEV_TAGS[@]} - KEEP_DEV ))
-          if [ $DELETE_DEV -gt 0 ]; then
-            echo "Deleting $DELETE_DEV old dev tags..."
-            for ((i=KEEP_DEV; i<${#DEV_TAGS[@]}; i++)); do
-              echo "  ❌ ${DEV_TAGS[$i]}"
-              curl -s -X DELETE -H "Authorization: JWT $TOKEN" \
-                "https://hub.docker.com/v2/repositories/${IMAGE}/tags/${DEV_TAGS[$i]}/" > /dev/null
-            done
-          fi
-
-          # 删除旧的 nightly tags
-          DELETE_NIGHTLY=$(( ${#NIGHTLY_TAGS[@]} - KEEP_NIGHTLY ))
-          if [ $DELETE_NIGHTLY -gt 0 ]; then
-            echo "Deleting $DELETE_NIGHTLY old nightly tags..."
-            for ((i=KEEP_NIGHTLY; i<${#NIGHTLY_TAGS[@]}; i++)); do
-              echo "  ❌ ${NIGHTLY_TAGS[$i]}"
-              curl -s -X DELETE -H "Authorization: JWT $TOKEN" \
-                "https://hub.docker.com/v2/repositories/${IMAGE}/tags/${NIGHTLY_TAGS[$i]}/" > /dev/null
-            done
-          fi
-
-          # 删除所有平台特定 tag
+          echo "=== 删除 ${#TO_DELETE[@]} 个 tag ==="
           for t in "${TO_DELETE[@]}"; do
-            echo "  🧹 ${t} (platform intermediate)"
-            curl -s -X DELETE -H "Authorization: JWT $TOKEN" \
-              "https://hub.docker.com/v2/repositories/${IMAGE}/tags/${t}/" > /dev/null
+            echo "  ❌ $t"
+            RESULT=$(curl -s -w "%{http_code}" -X DELETE \
+              -H "Authorization: JWT $TOKEN" \
+              "https://hub.docker.com/v2/repositories/${IMAGE}/tags/${t}/")
+            HTTP_CODE="${RESULT: -3}"
+            if [ "$HTTP_CODE" != "204" ]; then
+              echo "     ⚠️  HTTP $HTTP_CODE — token 可能缺少删除权限"
+            fi
           done
 
           echo ""
@@ -130,50 +93,82 @@ jobs:
     steps:
       - name: Cleanup GHCR tags
         run: |
-          # GHCR 使用 GitHub token 认证
-          IMAGE="ghcr.io/${{ github.repository_owner }}/nodeget-theme-abyssal"
-          KEEP_SHA=10
-
-          # 获取 packages
           PACKAGE_URL="https://api.github.com/users/${{ github.repository_owner }}/packages/container/nodeget-theme-abyssal/versions?per_page=100"
           VERSIONS=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
             -H "Accept: application/vnd.github+json" "$PACKAGE_URL")
 
-          # 获取所有 version IDs 和 tags
-          echo "$VERSIONS" | jq -r '.[] | "\(.id)\t\(.metadata.container.tags[]?)"' > /tmp/ghcr_versions.txt
+          if echo "$VERSIONS" | jq -e '.message' > /dev/null 2>&1; then
+            echo "⚠️  GHCR API error: $(echo "$VERSIONS" | jq -r '.message')"
+            exit 0
+          fi
 
-          # 需要删除的 IDs
+          # 提取 version id 和 tags
+          echo "$VERSIONS" | jq -r '.[] | "\(.id)\t\(.metadata.container.tags | join(",") // "")"' \
+            > /tmp/ghcr_versions.txt
+
           TO_DELETE_IDS=()
+          KEEP_NOW=true
           SHA_COUNT=0
 
-          while IFS=$'\t' read -r id tag; do
-            [ -z "$tag" ] && continue
-            case "$tag" in
-              latest)
-                continue
-                ;;
-            esac
+          while IFS=$'\t' read -r id tags_str; do
+            [ -z "$id" ] && continue
 
-            if echo "$tag" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-              continue  # 保留 release tag
-            elif echo "$tag" | grep -qE '^[0-9a-f]{7,}$'; then
-              SHA_COUNT=$((SHA_COUNT + 1))
-              if [ $SHA_COUNT -gt $KEEP_SHA ]; then
-                TO_DELETE_IDS+=("$id")
+            IFS=',' read -ra TAGS <<< "$tags_str"
+
+            # 空 tag 的 version — 直接删除（孤儿）
+            if [ ${#TAGS[@]} -eq 0 ] || ([ ${#TAGS[@]} -eq 1 ] && [ -z "${TAGS[0]}" ]); then
+              TO_DELETE_IDS+=("$id")
+              echo "  🧹 id=$id (orphan, no tags)"
+              continue
+            fi
+
+            local_keep=false
+            for tag in "${TAGS[@]}"; do
+              case "$tag" in
+                latest)
+                  local_keep=true
+                  echo "  📌 KEEP id=$id tags=${TAGS[*]}"
+                  break
+                  ;;
+              esac
+
+              if echo "$tag" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+                local_keep=true
+                echo "  🏷  KEEP id=$id tags=${TAGS[*]} (release)"
+                break
               fi
-            elif echo "$tag" | grep -qE '\-(amd64|arm64)$'; then
-              TO_DELETE_IDS+=("$id")  # 平台中间产物
+
+              if echo "$tag" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+-[0-9a-f]{7,}$'; then
+                if [ "$KEEP_NOW" = "true" ]; then
+                  local_keep=true
+                  KEEP_NOW=false
+                  echo "  🔖 KEEP id=$id tags=${TAGS[*]} (latest dev)"
+                  break
+                fi
+              fi
+            done
+
+            if [ "$local_keep" = "false" ]; then
+              TO_DELETE_IDS+=("$id")
+              echo "  ❌ id=$id tags=${TAGS[*]}"
             fi
           done < /tmp/ghcr_versions.txt
 
-          # 去重删除
+          # 去重
           UNIQUE_IDS=($(printf '%s\n' "${TO_DELETE_IDS[@]}" | sort -u))
-          echo "Deleting ${#UNIQUE_IDS[@]} GHCR versions..."
+          echo ""
+          echo "=== 删除 ${#UNIQUE_IDS[@]} 个 GHCR version ==="
           for id in "${UNIQUE_IDS[@]}"; do
-            echo "  ❌ GHCR version $id"
-            curl -s -X DELETE -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            [ -z "$id" ] && continue
+            RESULT=$(curl -s -w "%{http_code}" -X DELETE \
+              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
               -H "Accept: application/vnd.github+json" \
-              "https://api.github.com/users/${{ github.repository_owner }}/packages/container/nodeget-theme-abyssal/versions/$id" > /dev/null
+              "https://api.github.com/users/${{ github.repository_owner }}/packages/container/nodeget-theme-abyssal/versions/$id")
+            HTTP_CODE="${RESULT: -3}"
+            if [ "$HTTP_CODE" != "204" ]; then
+              echo "     ⚠️  HTTP $HTTP_CODE"
+            fi
           done
 
+          echo ""
           echo "✅ GHCR cleanup done"
