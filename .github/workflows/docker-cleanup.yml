@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: read
+  packages: write
 
 jobs:
   cleanup-dockerhub:
@@ -134,7 +135,7 @@ jobs:
           KEEP_SHA=10
 
           # 获取 packages
-          PACKAGE_URL="https://api.github.com/orgs/${{ github.repository_owner }}/packages/container/nodeget-theme-abyssal/versions?per_page=100"
+          PACKAGE_URL="https://api.github.com/users/${{ github.repository_owner }}/packages/container/nodeget-theme-abyssal/versions?per_page=100"
           VERSIONS=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
             -H "Accept: application/vnd.github+json" "$PACKAGE_URL")
 
@@ -172,7 +173,7 @@ jobs:
             echo "  ❌ GHCR version $id"
             curl -s -X DELETE -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
               -H "Accept: application/vnd.github+json" \
-              "https://api.github.com/orgs/${{ github.repository_owner }}/packages/container/nodeget-theme-abyssal/versions/$id" > /dev/null
+              "https://api.github.com/users/${{ github.repository_owner }}/packages/container/nodeget-theme-abyssal/versions/$id" > /dev/null
           done
 
           echo "✅ GHCR cleanup done"
