@@ -72,9 +72,7 @@ jobs:
             echo "Theme files changed:"
             echo "$CHANGED"
             git checkout theme-abyssal/main -- public/custom.css public/custom.js public/logo.png 2>/dev/null || true
-            if [ -d "$(git -C /tmp show theme-abyssal/main:public/assets 2>/dev/null)" ]; then
-              git checkout theme-abyssal/main -- public/assets/ 2>/dev/null || true
-            fi
+            git checkout theme-abyssal/main -- public/assets/ 2>/dev/null || true
             git checkout theme-abyssal/main -- nodeget-theme.json 2>/dev/null || true
             echo "theme_updated=true" >> "$GITHUB_OUTPUT"
           else
@@ -92,21 +90,17 @@ jobs:
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Push sync branch
+      - name: Push sync branch and Create PR
         if: steps.check-changes.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git push origin sync/upstream-updates --force
-
-      - name: Create Pull Request
-        if: steps.check-changes.outputs.changed == 'true'
-        uses: peter-evans/create-pull-request@v6
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          branch: sync/upstream-updates
-          base: main
-          title: '🔄 [Auto] Sync upstream updates'
-          body: |
-            ## 自动同步上游更新
+          gh pr create \
+            --base main \
+            --head sync/upstream-updates \
+            --title '🔄 [Auto] Sync upstream updates' \
+            --body '## 自动同步上游更新
 
             检测到以下上游有更新：
 
@@ -115,10 +109,9 @@ jobs:
 
             ### 合并策略
 
-            - StatusShow 冲突文件：保留本仓库版本（`package.json`、`vercel.json`、主题文件）
+            - StatusShow 冲突文件：保留本仓库版本
             - 主题 public/ 文件：从 abyssal 上游同步
-            - 其他冲突：以上游为准
 
-            请 review 后合并。Vercel 会在合并后自动重新部署。
-          labels: 'upstream-sync'
-          delete-branch: true
+            请 review 后合并。' \
+            --label 'upstream-sync' \
+            || true  # PR may already exist, that's fine
