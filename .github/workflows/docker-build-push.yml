@@ -8,9 +8,10 @@ on:
       - 'README.md'
       - 'LICENSE'
       - '.github/workflows/sync-upstream.yml'
+      - '.github/workflows/sync-release.yml'
       - 'docs/**'
   schedule:
-    - cron: '0 2 * * *'
+    - cron: '0 2 * * *'   # 每天 UTC 02:00 保底重建
   workflow_dispatch:
 
 permissions:
@@ -37,9 +38,37 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Short SHA
-        id: sha
-        run: echo "value=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Read version & sha
+        id: meta
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          SHA_SHORT=$(git rev-parse --short HEAD)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "sha=$SHA_SHORT" >> "$GITHUB_OUTPUT"
+
+      - name: Determine tags
+        id: tags
+        run: |
+          SHA="${{ steps.meta.outputs.sha }}"
+          VERSION="${{ steps.meta.outputs.version }}"
+
+          # Tag 策略：
+          # push v* tag  → latest + sha + 纯净版本号 (如 1.4.3)
+          # push main    → latest + sha + 版本号-sha (如 1.4.3-a1b2c3d)
+          # schedule     → nightly-sha + sha
+
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            VER_TAG="$VERSION"                           # 纯净版本号
+            echo "type=release" >> "$GITHUB_OUTPUT"
+          elif [[ "${{ github.event_name }}" == "schedule" ]]; then
+            VER_TAG="nightly-${SHA}"                     # 保底 nightly
+            echo "type=nightly" >> "$GITHUB_OUTPUT"
+          else
+            VER_TAG="${VERSION}-${SHA}"                  # 版本号-短commit
+            echo "type=dev" >> "$GITHUB_OUTPUT"
+          fi
+
+          echo "ver_tag=$VER_TAG" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -57,15 +86,15 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push
+      - name: Build and push (platform-specific)
         uses: docker/build-push-action@v6
         with:
           context: .
           platforms: ${{ matrix.platform }}
           push: true
           tags: |
-            coldsword/nodeget-theme-abyssal:${{ steps.sha.outputs.value }}-${{ matrix.suffix }}
-            ghcr.io/${{ github.repository_owner }}/nodeget-theme-abyssal:${{ steps.sha.outputs.value }}-${{ matrix.suffix }}
+            coldsword/nodeget-theme-abyssal:${{ steps.meta.outputs.sha }}-${{ matrix.suffix }}
+            ghcr.io/${{ github.repository_owner }}/nodeget-theme-abyssal:${{ steps.meta.outputs.sha }}-${{ matrix.suffix }}
 
   # ── 2. 合并多架构 manifest ────────────────────────────
   merge:
@@ -76,9 +105,29 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Short SHA
-        id: sha
-        run: echo "value=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Read version & sha
+        id: meta
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          SHA_SHORT=$(git rev-parse --short HEAD)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "sha=$SHA_SHORT" >> "$GITHUB_OUTPUT"
+
+      - name: Determine version tag
+        id: tags
+        run: |
+          SHA="${{ steps.meta.outputs.sha }}"
+          VERSION="${{ steps.meta.outputs.version }}"
+
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            VER_TAG="$VERSION"
+          elif [[ "${{ github.event_name }}" == "schedule" ]]; then
+            VER_TAG="nightly-${SHA}"
+          else
+            VER_TAG="${VERSION}-${SHA}"
+          fi
+
+          echo "ver_tag=$VER_TAG" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -99,16 +148,10 @@ jobs:
       - name: Merge manifests (DockerHub)
         run: |
           IMAGE="coldsword/nodeget-theme-abyssal"
-          SHA="${{ steps.sha.outputs.value }}"
-          VERSION=""
+          SHA="${{ steps.meta.outputs.sha }}"
+          VER_TAG="${{ steps.tags.outputs.ver_tag }}"
 
-          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-            VERSION="${GITHUB_REF#refs/tags/v}"
-          fi
-
-          TAGS="-t ${IMAGE}:latest -t ${IMAGE}:${SHA}"
-          [ -n "$VERSION" ] && TAGS="$TAGS -t ${IMAGE}:${VERSION}"
-
+          TAGS="-t ${IMAGE}:latest -t ${IMAGE}:${SHA} -t ${IMAGE}:${VER_TAG}"
           docker buildx imagetools create \
             $TAGS \
             ${IMAGE}:${SHA}-amd64 \
@@ -117,17 +160,35 @@ jobs:
       - name: Merge manifests (GHCR)
         run: |
           IMAGE="ghcr.io/${{ github.repository_owner }}/nodeget-theme-abyssal"
-          SHA="${{ steps.sha.outputs.value }}"
-          VERSION=""
+          SHA="${{ steps.meta.outputs.sha }}"
+          VER_TAG="${{ steps.tags.outputs.ver_tag }}"
 
-          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-            VERSION="${GITHUB_REF#refs/tags/v}"
-          fi
-
-          TAGS="-t ${IMAGE}:latest -t ${IMAGE}:${SHA}"
-          [ -n "$VERSION" ] && TAGS="$TAGS -t ${IMAGE}:${VERSION}"
-
+          TAGS="-t ${IMAGE}:latest -t ${IMAGE}:${SHA} -t ${IMAGE}:${VER_TAG}"
           docker buildx imagetools create \
             $TAGS \
             ${IMAGE}:${SHA}-amd64 \
             ${IMAGE}:${SHA}-arm64
+
+  # ── 3. 清理平台中间产物 ────────────────────────────
+  # 深度清理（保留策略）由 .github/workflows/docker-cleanup.yml 负责
+  cleanup-platform-tags:
+    needs: merge
+    runs-on: ubuntu-latest
+    steps:
+      - name: Remove platform-specific intermediate tags
+        run: |
+          SHA="$(git rev-parse --short HEAD)"
+          IMAGE="coldsword/nodeget-theme-abyssal"
+
+          TOKEN=$(curl -s -H "Content-Type: application/json" \
+            -d '{"username":"${{ secrets.DOCKERHUB_USERNAME }}","password":"${{ secrets.DOCKERHUB_TOKEN }}"}' \
+            https://hub.docker.com/v2/users/login/ | jq -r '.token')
+
+          if [ -n "$TOKEN" ] && [ "$TOKEN" != "null" ]; then
+            for suffix in amd64 arm64; do
+              echo "  🧹 Deleting ${IMAGE}:${SHA}-${suffix}"
+              curl -s -X DELETE -H "Authorization: JWT $TOKEN" \
+                "https://hub.docker.com/v2/repositories/${IMAGE}/tags/${SHA}-${suffix}/" > /dev/null
+            done
+          fi
+          echo "✅ Platform intermediate tags cleaned"

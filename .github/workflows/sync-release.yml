@@ -1,0 +1,61 @@
+name: Sync Release from Upstream
+
+on:
+  schedule:
+    - cron: '30 0 * * *'   # UTC 00:30 — 每天 sync-upstream (00:00) 之后 30 分钟
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  check-release:
+    runs-on: ubuntu-latest
+    outputs:
+      new_release: ${{ steps.check.outputs.new_release }}
+      tag: ${{ steps.check.outputs.tag }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check upstream release
+        id: check
+        run: |
+          # 获取 NodeSeekDev/NodeGet-StatusShow 最新 release
+          UPSTREAM=$(curl -sL \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            https://api.github.com/repos/NodeSeekDev/NodeGet-StatusShow/releases/latest)
+
+          UPSTREAM_TAG=$(echo "$UPSTREAM" | jq -r '.tag_name // empty')
+          echo "Upstream latest release: ${UPSTREAM_TAG:-none}"
+
+          if [ -z "$UPSTREAM_TAG" ] || [ "$UPSTREAM_TAG" = "null" ]; then
+            echo "No upstream release found"
+            echo "new_release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # 检查本仓库是否已有同名 tag
+          if git rev-parse "refs/tags/$UPSTREAM_TAG" >/dev/null 2>&1; then
+            echo "Tag $UPSTREAM_TAG already exists in fork"
+            echo "new_release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # 有新 release
+          echo "✅ New upstream release: $UPSTREAM_TAG"
+          echo "new_release=true" >> "$GITHUB_OUTPUT"
+          echo "tag=$UPSTREAM_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Create and push tag
+        if: steps.check.outputs.new_release == 'true'
+        run: |
+          TAG="${{ steps.check.outputs.tag }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "Release $TAG — synced from upstream NodeSeekDev/NodeGet-StatusShow"
+          git push origin "$TAG"
+          echo "📌 Tag $TAG pushed → will trigger build-release + docker-build-push"
