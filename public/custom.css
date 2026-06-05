@@ -610,6 +610,155 @@ html.nodeget-abyssal-theme main > .flex.flex-wrap > button[class*="bg-primary"] 
   box-shadow: inset 0 -1px 0 rgba(255, 230, 203, 0.08) !important;
 }
 
+.nodeget-hidden-tag-filter,
+.nodeget-provider-hidden,
+html.nodeget-abyssal-theme .nodeget-hidden-tag-filter,
+html.nodeget-abyssal-theme main > .flex.flex-wrap.nodeget-hidden-tag-filter {
+  display: none !important;
+}
+
+.nodeget-provider-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.nodeget-provider-chip {
+  padding: 0.25rem 0.75rem;
+  border: 1px solid hsl(var(--border));
+  border-radius: 999px;
+  appearance: none;
+  background: hsl(var(--card));
+  color: hsl(var(--foreground) / 0.8);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.75rem;
+  line-height: 1rem;
+  transition:
+    background-color 150ms ease,
+    border-color 150ms ease,
+    color 150ms ease;
+}
+
+.nodeget-provider-chip:hover {
+  background: hsl(var(--accent));
+}
+
+.nodeget-provider-chip.is-active {
+  border-color: hsl(var(--primary));
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+}
+
+html.nodeget-abyssal-theme .nodeget-provider-filter {
+  position: relative;
+  display: grid !important;
+  grid-template-columns: repeat(auto-fit, minmax(9.75rem, 1fr));
+  gap: 0 !important;
+  max-height: 8.55rem !important;
+  overflow-y: auto !important;
+  padding: 1.42rem 0.62rem 0.62rem;
+  border: 0;
+  border-top: 1px solid var(--nodeget-archive-border);
+  border-bottom: 1px solid var(--nodeget-archive-border);
+  border-radius: 0;
+  background-color: transparent;
+  background-image: none;
+  background-size: auto;
+  box-shadow: none;
+  scrollbar-width: thin;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+html.nodeget-abyssal-theme .nodeget-provider-filter::before {
+  content: "PROVIDER INDEX";
+  position: absolute;
+  top: 0.38rem;
+  left: 0.62rem;
+  color: var(--nodeget-archive-faint);
+  font-size: 0.61rem;
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+html.nodeget-abyssal-theme .nodeget-provider-chip {
+  position: relative;
+  display: block !important;
+  justify-content: flex-start;
+  min-width: 0;
+  min-height: 1.72rem;
+  padding-left: 2.35rem;
+  padding-right: 0.55rem;
+  overflow: hidden;
+  border: 0 !important;
+  border-left: 1px solid rgba(255, 230, 203, 0.1) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  color: rgba(255, 230, 203, 0.7) !important;
+  font-family: var(--nodeget-abyssal-label-font);
+  font-size: 0.62rem;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-align: left;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+  box-shadow: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+html.nodeget-abyssal-theme .nodeget-provider-chip::before {
+  content: attr(data-nodeget-provider-index);
+  position: absolute;
+  left: 0.62rem;
+  color: var(--nodeget-archive-faint);
+  font-size: 0.55rem;
+  letter-spacing: 0.08em;
+}
+
+html.nodeget-abyssal-theme .nodeget-provider-chip + .nodeget-provider-chip {
+  margin-left: 0;
+}
+
+html.nodeget-abyssal-theme .nodeget-provider-chip:hover {
+  border-left-color: var(--nodeget-archive-border-strong) !important;
+  color: var(--nodeget-archive-text) !important;
+  background-color: rgba(255, 230, 203, 0.035) !important;
+}
+
+html.nodeget-abyssal-theme .nodeget-provider-chip.is-active {
+  border-left-color: rgba(255, 230, 203, 0.5) !important;
+  background-color: rgba(255, 230, 203, 0.055) !important;
+  color: var(--nodeget-archive-text) !important;
+  box-shadow: inset 0 -1px 0 rgba(255, 230, 203, 0.08) !important;
+}
+
+@media (max-width: 767px) {
+  html.nodeget-provider-filter-reserved main > .grid:first-of-type {
+    margin-top: 8.55rem;
+  }
+
+  html.nodeget-abyssal-theme .nodeget-provider-filter {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    min-height: 8.55rem;
+    max-width: 100%;
+    overflow-x: hidden;
+    padding-bottom: 0.65rem;
+  }
+
+  html.nodeget-abyssal-theme .nodeget-provider-chip {
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: 100%;
+    white-space: nowrap;
+  }
+}
+
 html.nodeget-abyssal-theme .nodeget-archive-grid {
   gap: 1px !important;
   padding: 0;
@@ -1631,6 +1780,26 @@ html.nodeget-abyssal-theme:not(.dark) main > .flex.flex-wrap > button {
 html.nodeget-abyssal-theme:not(.dark) main > .flex.flex-wrap > button:hover,
 html.nodeget-abyssal-theme:not(.dark) main > .flex.flex-wrap > button.bg-primary,
 html.nodeget-abyssal-theme:not(.dark) main > .flex.flex-wrap > button[class*="bg-primary"] {
+  border-left-color: var(--nodeget-archive-border-strong) !important;
+  background: rgba(0, 79, 115, 0.075) !important;
+  color: var(--nodeget-archive-text) !important;
+  box-shadow: inset 0 -1px 0 rgba(0, 79, 115, 0.08) !important;
+}
+
+html.nodeget-abyssal-theme:not(.dark) .nodeget-provider-filter {
+  border-top-color: var(--nodeget-archive-border) !important;
+  border-bottom-color: var(--nodeget-archive-border) !important;
+  background: transparent !important;
+}
+
+html.nodeget-abyssal-theme:not(.dark) .nodeget-provider-chip {
+  border-left-color: rgba(0, 79, 115, 0.14) !important;
+  background: transparent !important;
+  color: var(--nodeget-archive-muted) !important;
+}
+
+html.nodeget-abyssal-theme:not(.dark) .nodeget-provider-chip:hover,
+html.nodeget-abyssal-theme:not(.dark) .nodeget-provider-chip.is-active {
   border-left-color: var(--nodeget-archive-border-strong) !important;
   background: rgba(0, 79, 115, 0.075) !important;
   color: var(--nodeget-archive-text) !important;

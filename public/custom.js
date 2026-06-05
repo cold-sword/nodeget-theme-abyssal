@@ -21,6 +21,7 @@
   let flagSwapDirty = false
   let detailDrawerDirty = false
   let segmentedBarsDirty = false
+  let activeProviderFilter = ''
   let detailDrawerPendingTimer = 0
   let lastDetailSessionMeta = null
   let segmentedMetricCache = null
@@ -30,6 +31,7 @@
   const ARCHIVE_GRID_SELECTOR = 'main .grid'
   const ARCHIVE_CARD_SELECTOR = 'main .grid > a[href^="#"]'
   const DETAIL_ROOT_SELECTOR = 'div.fixed.inset-0.z-50.bg-background.overflow-y-auto, .nodeget-detail-drawer-root'
+  const PROVIDER_FILTER_RESERVE_CLASS = 'nodeget-provider-filter-reserved'
   const THEME_MANIFEST_URL = 'nodeget-theme.json'
   const FOOTER_THEME_NOTE_ID = 'nodeget-abyssal-footer-theme-note'
   const FOOTER_VERSION_ID = 'nodeget-abyssal-footer-version'
@@ -46,6 +48,20 @@
   const LATENCY_INCREMENTAL_OVERLAP_MS = 2 * 60 * 1000
   const LATENCY_QUERY_TIMEOUT_MS = 18 * 1000
   const LATENCY_QUERY_LIMIT_DEFAULT = 20000
+  const LATENCY_TARGET_ORDER = [
+    '北京电信',
+    '北京联通',
+    '北京移动',
+    '上海电信',
+    '上海联通',
+    '上海移动',
+    '广东电信',
+    '广东联通',
+    '广东移动',
+  ]
+  const LATENCY_TARGET_ORDER_INDEX = new Map(LATENCY_TARGET_ORDER.map(function (name, index) {
+    return [name, index]
+  }))
 
   // Cap the rows a 24h latency task_query may request so the result set stays
   // bounded. A deployment with stricter backend query limits can lower this via
@@ -58,9 +74,32 @@
       : LATENCY_QUERY_LIMIT_DEFAULT
   }
 
+  function normalizeLatencyTargetName(value) {
+    return String(value || '')
+      .trim()
+      .replace(/^(?:tcp[_-]?ping|tcping|ping)[-_\s]*/i, '')
+      .replace(/\s+/g, ' ')
+  }
+
+  function latencyTargetOrderIndex(value) {
+    const normalized = normalizeLatencyTargetName(value)
+    return LATENCY_TARGET_ORDER_INDEX.has(normalized) ? LATENCY_TARGET_ORDER_INDEX.get(normalized) : Infinity
+  }
+
+  function compareLatencyTargets(aName, bName, aAddress, bAddress) {
+    const ai = latencyTargetOrderIndex(aName)
+    const bi = latencyTargetOrderIndex(bName)
+    if (ai !== bi) return ai - bi
+
+    const nameCompare = String(aName || '').localeCompare(String(bName || ''))
+    if (nameCompare) return nameCompare
+    return String(aAddress || '').localeCompare(String(bAddress || ''))
+  }
+
   if (!NODEGET_CUSTOM_PATCH_TEST_MODE) {
     sanitizeUnsupportedMapView()
     installAbyssalArchiveTheme()
+    primeProviderFilterReserve()
     installLatencyTaskProxy()
     loadConfig().then(applySiteTitle).catch(function () {})
   }
@@ -181,12 +220,267 @@
       translateCardPreviewEnglish(card)
     })
     enhanceArchiveTables(ctx)
+    syncProviderFilter(ctx)
     syncSegmentedMetricBars()
 
     Array.from(document.querySelectorAll('main h1, main h2, main h3')).forEach(function (heading) {
       heading.classList.add('nodeget-archive-heading')
     })
     Array.from(document.querySelectorAll('main table, main > .flex.flex-wrap, [role="tablist"]')).forEach(translateGlobalEnglish)
+  }
+
+  function normalizeKey(value) {
+    return String(value || '')
+      .trim()
+      .replace(/\s+/g, ' ')
+      .toLowerCase()
+  }
+
+  function escapeHtml(value) {
+    return String(value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;')
+  }
+
+  function providerFromName(value) {
+    const name = String(value || '').trim()
+    if (!name) return ''
+    return name.split(/\s+/)[0].replace(/[\uff1a:]+$/, '').trim()
+  }
+
+  function deriveProviderListFromNames(names) {
+    const providers = []
+    const seen = new Set()
+    Array.from(names || []).forEach(function (name) {
+      const provider = providerFromName(name)
+      const key = normalizeKey(provider)
+      if (!provider || !key || key === 'all' || seen.has(key)) return
+      seen.add(key)
+      providers.push(provider)
+    })
+    return providers
+  }
+
+  function archiveCardName(card) {
+    if (!card || !card.querySelector) return ''
+    const title = card.querySelector('span.font-semibold[title]')
+    if (title && title.getAttribute('title')) return title.getAttribute('title')
+    const name = card.querySelector('span.font-semibold')
+    return name ? name.textContent : ''
+  }
+
+  function tableRowNodeName(row) {
+    if (!row || !row.querySelector) return ''
+    const name = row.querySelector('td:nth-child(2) span.truncate')
+    if (name) return name.textContent
+    const nameCell = row.children && row.children[1]
+    return nameCell ? nameCell.textContent : ''
+  }
+
+  function collectProviderList(ctx) {
+    const names = []
+    const cards = ctx && ctx.archiveCards ? ctx.archiveCards : Array.from(document.querySelectorAll(ARCHIVE_CARD_SELECTOR))
+    const rows = ctx && ctx.tableRows ? ctx.tableRows : Array.from(document.querySelectorAll('main tbody tr'))
+
+    cards.forEach(function (card) {
+      names.push(archiveCardName(card))
+    })
+    rows.forEach(function (row) {
+      names.push(tableRowNodeName(row))
+    })
+
+    return deriveProviderListFromNames(names)
+  }
+
+  function isMobileViewport() {
+    return typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 767px)').matches
+  }
+
+  function setProviderFilterReserve(reserved) {
+    const root = document.documentElement
+    if (!root || !root.classList) return
+    root.classList.toggle(PROVIDER_FILTER_RESERVE_CLASS, !!reserved && isMobileViewport())
+  }
+
+  function primeProviderFilterReserve() {
+    if (!isMobileViewport()) return
+    setProviderFilterReserve(true)
+    if (document.readyState === 'loading') {
+      document.addEventListener(
+        'DOMContentLoaded',
+        function () {
+          setProviderFilterReserve(true)
+        },
+        { once: true },
+      )
+    }
+  }
+
+  function setProviderHidden(el, hidden) {
+    if (!el || !el.classList) return
+    el.classList.toggle('nodeget-provider-hidden', hidden)
+    if (hidden) el.setAttribute('aria-hidden', 'true')
+    else el.removeAttribute('aria-hidden')
+  }
+
+  function applyProviderVisibility(ctx) {
+    const providerKey = normalizeKey(activeProviderFilter)
+    const cards = ctx && ctx.archiveCards ? ctx.archiveCards : Array.from(document.querySelectorAll(ARCHIVE_CARD_SELECTOR))
+    const rows = ctx && ctx.tableRows ? ctx.tableRows : Array.from(document.querySelectorAll('main tbody tr'))
+
+    cards.forEach(function (card) {
+      const cardProviderKey = normalizeKey(providerFromName(archiveCardName(card)))
+      setProviderHidden(card, !!providerKey && cardProviderKey !== providerKey)
+    })
+
+    rows.forEach(function (row) {
+      const rowProviderKey = normalizeKey(providerFromName(tableRowNodeName(row)))
+      setProviderHidden(row, !!providerKey && rowProviderKey !== providerKey)
+    })
+  }
+
+  function isAllFilterLabel(value) {
+    const key = normalizeKey(value)
+    return key === 'all' || key.indexOf('\u5168\u90e8') === 0
+  }
+
+  function isOfficialFilterRow(el) {
+    if (!el || !el.classList || el.classList.contains('nodeget-provider-filter')) return false
+    if (!el.classList.contains('flex') || !el.classList.contains('flex-wrap')) return false
+    const buttons = Array.from(el.querySelectorAll(':scope > button'))
+    return buttons.length > 0 && buttons.some(function (button) {
+      return isAllFilterLabel(button.textContent)
+    })
+  }
+
+  function findOfficialFilterRows(ctx) {
+    const main = (ctx && ctx.main) || document.querySelector('main')
+    if (!main) return []
+    return Array.from(main.children || []).filter(isOfficialFilterRow)
+  }
+
+  function resetHiddenTagFilter(row) {
+    if (!row) return
+    const buttons = Array.from(row.querySelectorAll(':scope > button'))
+    if (!buttons.length) return
+    const selected = buttons.find(function (button) {
+      return button.textContent && !isAllFilterLabel(button.textContent) && /\bbg-primary\b/.test(button.className || '')
+    })
+    if (selected && buttons[0] && typeof buttons[0].click === 'function') buttons[0].click()
+  }
+
+  function rowHasFlagFilters(row) {
+    return Array.from(row.querySelectorAll('img')).some(isFlagImage)
+  }
+
+  function syncOfficialFilterRows(ctx, hideTagFilters) {
+    const rows = findOfficialFilterRows(ctx)
+    rows.forEach(function (filterRow) {
+      if (!hideTagFilters || rowHasFlagFilters(filterRow)) {
+        filterRow.classList.remove('nodeget-hidden-tag-filter')
+        filterRow.removeAttribute('aria-hidden')
+        return
+      }
+      resetHiddenTagFilter(filterRow)
+      filterRow.classList.add('nodeget-hidden-tag-filter')
+      filterRow.setAttribute('aria-hidden', 'true')
+    })
+    return rows
+  }
+
+  function providerFilterButtonHtml(provider, selected, index) {
+    const value = provider || ''
+    const archiveIndex = String(index || 0).padStart(2, '0')
+    return (
+      '<button type="button" class="nodeget-provider-chip' +
+      (selected ? ' is-active' : '') +
+      '" data-nodeget-provider-filter="' +
+      escapeHtml(value) +
+      '" data-nodeget-provider-index="' +
+      archiveIndex +
+      '" aria-pressed="' +
+      (selected ? 'true' : 'false') +
+      '">' +
+      escapeHtml(value || 'ALL') +
+      '</button>'
+    )
+  }
+
+  function renderProviderFilter(row, providers) {
+    const list = Array.isArray(providers) ? providers.filter(Boolean) : []
+    if (
+      activeProviderFilter &&
+      !list.some(function (provider) {
+        return normalizeKey(provider) === normalizeKey(activeProviderFilter)
+      })
+    ) {
+      activeProviderFilter = ''
+    }
+
+    const html =
+      providerFilterButtonHtml('', !activeProviderFilter, 0) +
+      list
+        .map(function (provider, index) {
+          return providerFilterButtonHtml(provider, normalizeKey(provider) === normalizeKey(activeProviderFilter), index + 1)
+        })
+        .join('')
+
+    row.classList.remove('nodeget-provider-filter-pending')
+    row.setAttribute('role', 'group')
+    row.setAttribute('aria-label', 'Provider filter')
+    if (row.innerHTML !== html) row.innerHTML = html
+  }
+
+  function ensureProviderFilterShell(ctx, anchorRows) {
+    ctx = ctx || collectDomContext()
+    const main = ctx.main
+    if (!main) return null
+
+    const rows = anchorRows || findOfficialFilterRows(ctx)
+    const anchor = rows[rows.length - 1] || null
+    let row = main.querySelector(':scope > .nodeget-provider-filter')
+    if (!row) {
+      row = document.createElement('div')
+      row.className = 'nodeget-provider-filter nodeget-provider-filter-pending'
+    }
+
+    if (anchor) {
+      if (row.previousElementSibling !== anchor) {
+        anchor.parentElement.insertBefore(row, anchor.nextSibling)
+      }
+    } else if (row.parentElement !== main || main.firstChild !== row) {
+      main.insertBefore(row, main.firstChild)
+    }
+
+    setProviderFilterReserve(false)
+    return row
+  }
+
+  function removeProviderFilter(ctx) {
+    const main = (ctx && ctx.main) || document.querySelector('main')
+    const row = main && main.querySelector(':scope > .nodeget-provider-filter')
+    if (row) row.remove()
+    activeProviderFilter = ''
+    applyProviderVisibility(ctx)
+    setProviderFilterReserve(false)
+  }
+
+  function syncProviderFilter(ctx) {
+    ctx = ctx || collectDomContext()
+    const providers = collectProviderList(ctx)
+    const officialRows = syncOfficialFilterRows(ctx, providers.length > 0)
+    if (!providers.length) {
+      removeProviderFilter(ctx)
+      return
+    }
+
+    const row = ensureProviderFilterShell(ctx, officialRows)
+    if (!row) return
+    renderProviderFilter(row, providers)
+    applyProviderVisibility(ctx)
   }
 
   function annotateArchiveCardRegions(card) {
@@ -948,7 +1242,7 @@
 
     return Array.from(buckets.values())
       .sort(function (a, b) {
-        return a.timestamp - b.timestamp || String(a.source).localeCompare(String(b.source))
+        return a.timestamp - b.timestamp || compareLatencyTargets(a.source, b.source)
       })
       .map(function (bucket) {
         const template = bucket.template || {}
@@ -1548,7 +1842,7 @@
     const el = node && (node.nodeType === 1 ? node : node.parentElement)
     if (!el || !el.closest) return false
     return !!el.closest(
-      '.nodeget-detail-drawer-close, .nodeget-abyssal-brand-icon, .nodeget-archive-footer-powered, .nodeget-archive-footer-version, .nodeget-archive-footer-theme-note',
+      '.nodeget-provider-filter, .nodeget-provider-chip, .nodeget-detail-drawer-close, .nodeget-abyssal-brand-icon, .nodeget-archive-footer-powered, .nodeget-archive-footer-version, .nodeget-archive-footer-theme-note',
     )
   }
 
@@ -1627,15 +1921,27 @@
       mergeLatencyRows,
       downsampleLatencyRows,
       normalizeLatencyTimestamp,
+      compareLatencyTargets,
       normalizeFooterVersion,
       ensureFooterVersionElement,
       applyFooterVersionText,
       renderFooterThemeNote,
+      providerFromName,
+      deriveProviderListFromNames,
+      providerFilterButtonHtml,
     }
     return
   }
 
   document.addEventListener('click', function (event) {
+    const providerButton = event.target && event.target.closest ? event.target.closest('[data-nodeget-provider-filter]') : null
+    if (providerButton) {
+      event.preventDefault()
+      activeProviderFilter = providerButton.getAttribute('data-nodeget-provider-filter') || ''
+      syncProviderFilter(collectDomContext())
+      return
+    }
+
     if (isLikelyDetailOpenClick(event.target)) {
       rememberDetailSessionFromClick(event.target)
       armDetailDrawerPending()
