@@ -1,0 +1,57 @@
+name: SEO – Google Indexing
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  notify-google:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Notify Google Indexing API
+        env:
+          GSC_SA_KEY: ${{ secrets.GSC_SA_KEY }}
+          INDEXING_DOMAIN: ${{ vars.INDEXING_DOMAIN || 'nodeget.li' }}
+          INDEXING_URLS: ${{ vars.INDEXING_URLS || 'https://nodeget.li/' }}
+        run: |
+          import json, os, sys, urllib.request, urllib.error
+          from google.oauth2 import service_account
+          from google.auth.transport.requests import Request
+
+          sa_info = json.loads(os.environ["GSC_SA_KEY"])
+          creds = service_account.Credentials.from_service_account_info(
+              sa_info, scopes=["https://www.googleapis.com/auth/indexing"]
+          )
+          creds.refresh(Request())
+          token = creds.token
+
+          urls = os.environ["INDEXING_URLS"].split(",")
+          ok = fail = 0
+
+          for url in urls:
+              url = url.strip()
+              body = json.dumps({"url": url, "type": "URL_UPDATED"}).encode()
+              req = urllib.request.Request(
+                  "https://indexing.googleapis.com/v3/urlNotifications:publish",
+                  method="POST", data=body,
+                  headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+              )
+              try:
+                  resp = urllib.request.urlopen(req)
+                  data = json.loads(resp.read())
+                  print(f"✅ {url} – {data.get('urlNotificationMetadata',{}).get('latestUpdate',{}).get('notifyTime','OK')}")
+                  ok += 1
+              except urllib.error.HTTPError as e:
+                  body = json.loads(e.read().decode())
+                  err = body.get("error", {}).get("message", str(e))
+                  print(f"❌ {url} – {err}")
+                  fail += 1
+
+          print(f"\nDone: {ok} ok, {fail} failed")
+          sys.exit(1 if fail > 0 else 0)
+        shell: python
