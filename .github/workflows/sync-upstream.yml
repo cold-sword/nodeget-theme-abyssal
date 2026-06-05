@@ -56,7 +56,7 @@ jobs:
         if: steps.merge-statusshow.outputs.merge_failed == 'true'
         run: |
           # Keep our versions for theme-critical files
-          for f in package.json nodeget-theme.json vercel.json public/custom.css public/custom.js public/logo.png .gitignore .env.example; do
+          for f in index.html package.json nodeget-theme.json vercel.json public/custom.css public/custom.js public/logo.png .gitignore .env.example; do
             if git ls-files -u | grep -q "$f"; then
               git checkout --ours "$f" 2>/dev/null && git add "$f" 2>/dev/null || true
             fi
