@@ -13,6 +13,9 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Install dependencies
+        run: pip install google-auth google-auth-httplib2
+
       - name: Notify Google Indexing API
         env:
           GSC_SA_KEY: ${{ secrets.GSC_SA_KEY }}
