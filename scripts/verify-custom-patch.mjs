@@ -120,11 +120,15 @@ test('custom patch test API exposure', () => {
     'mergeLatencyRows',
     'downsampleLatencyRows',
     'normalizeLatencyTimestamp',
+    'compareLatencyTargets',
     'normalizeFooterVersion',
     'ensureFooterVersionElement',
     'applyFooterVersionText',
     'renderFooterThemeNote',
     'sanitizeUnsupportedMapView',
+    'providerFromName',
+    'deriveProviderListFromNames',
+    'providerFilterButtonHtml',
   ]) {
     assert.equal(typeof window.__NODEGET_CUSTOM_PATCH_TEST_API__[name], 'function')
   }
@@ -199,6 +203,25 @@ test('SORT menu marker remains absent', () => {
   assert.equal((customJs.match(/aria-haspopup="menu"/g) || []).length, 0, 'SORT menu CSS/JS marker should remain absent if SORT is long-term hidden')
 })
 
+test('provider filter derives stable public provider labels from node names', () => {
+  assert.equal(api.providerFromName('Akile: HK 01'), 'Akile')
+  assert.equal(api.providerFromName('Bandwagon\uff1a LA 02'), 'Bandwagon')
+  assert.deepEqual(
+    Array.from(api.deriveProviderListFromNames(['Akile HK 01', 'Bandwagon LA 02', 'akile SG 02', 'Oracle Tokyo', '', 'ALL Nodes'])),
+    ['Akile', 'Bandwagon', 'Oracle'],
+  )
+})
+
+test('provider filter button markup escapes labels and tracks active state', () => {
+  const html = api.providerFilterButtonHtml('Foo & "Bar"', true, 3)
+
+  assert.ok(html.includes('class="nodeget-provider-chip is-active"'))
+  assert.ok(html.includes('data-nodeget-provider-filter="Foo &amp; &quot;Bar&quot;"'))
+  assert.ok(html.includes('data-nodeget-provider-index="03"'))
+  assert.ok(html.includes('aria-pressed="true"'))
+  assert.ok(html.endsWith('Foo &amp; &quot;Bar&quot;</button>'))
+})
+
 test('critical custom.js patch-layer markers remain present', () => {
   const requiredJsMarkers = [
     'new MutationObserver',
@@ -232,6 +255,8 @@ test('critical custom.js patch-layer markers remain present', () => {
     // Extension seam: deployments with stricter backend query limits override
     // the latency row cap here, so the private value stays out of the theme.
     'NODEGET_LATENCY_QUERY_LIMIT',
+    'nodeget-provider-filter',
+    'providerFilterButtonHtml',
   ]
 
   for (const marker of requiredJsMarkers) {
@@ -239,13 +264,12 @@ test('critical custom.js patch-layer markers remain present', () => {
   }
 })
 
-test('private server-order and provider filter code stays out of public patch', () => {
+test('private server-order code stays out while provider filter stays public', () => {
   for (const marker of [
     'server-order.json',
     'enable_server_order',
     'loadServerOrder',
     'nodeget-server_list_all_agent_uuid',
-    'nodeget-provider-filter',
     'providerChipHtml',
     // Deployment-specific proxy routes must not be hard-coded here; the theme
     // matches flags via the NODEGET_FLAG_MATCHERS seam, so this literal route
@@ -261,7 +285,7 @@ test('private server-order and provider filter code stays out of public patch', 
     'nodeget-provider-hidden',
     'nodeget-hidden-tag-filter',
   ]) {
-    assert.equal(customCss.includes(marker), false, `custom.css must not contain private marker: ${marker}`)
+    assert.ok(customJs.includes(marker) || customCss.includes(marker), `provider filter marker should be public: ${marker}`)
   }
 })
 
@@ -407,6 +431,28 @@ test('downsampleLatencyRows groups by 5-minute bucket and source', () => {
   assert.equal(downsampled[1].timestamp, bucketStart)
   assert.equal(downsampled[1].cron_source, 'source-b')
   assert.equal(downsampled[1].task_event_result.ping, 40)
+})
+
+test('downsampleLatencyRows orders known probe sources for legends', () => {
+  const now = 1_700_100_000_000
+  const bucketStart = Math.floor((now - HOUR) / (5 * MIN)) * (5 * MIN)
+
+  const downsampled = api.downsampleLatencyRows(
+    [
+      row({ task_id: 'gd-mobile', timestamp: bucketStart + MIN, cron_source: 'ping-广东移动', task_event_result: { ping: 90 } }),
+      row({ task_id: 'bj-telecom', timestamp: bucketStart + MIN, cron_source: '北京电信', task_event_result: { ping: 10 } }),
+      row({ task_id: 'sh-unicom', timestamp: bucketStart + MIN, cron_source: 'tcping-上海联通', task_event_result: { ping: 50 } }),
+      row({ task_id: 'bj-mobile', timestamp: bucketStart + MIN, cron_source: '北京移动', task_event_result: { ping: 30 } }),
+      row({ task_id: 'unknown', timestamp: bucketStart + MIN, cron_source: 'ZZZ', task_event_result: { ping: 100 } }),
+    ],
+    'ping',
+    now,
+  )
+
+  assert.deepEqual(
+    Array.from(downsampled, (item) => item.cron_source),
+    ['北京电信', '北京移动', 'tcping-上海联通', 'ping-广东移动', 'ZZZ'],
+  )
 })
 
 test('downsampleLatencyRows ignores unknown source rows', () => {
