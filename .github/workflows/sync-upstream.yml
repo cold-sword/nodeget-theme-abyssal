@@ -70,13 +70,16 @@ jobs:
       - name: Sync theme-abyssal public files
         run: |
           # Only copy files that actually changed in upstream theme
-          CHANGED=$(git diff --name-only HEAD theme-abyssal/main -- public/ nodeget-theme.json 2>/dev/null || true)
+          CHANGED=$(git diff --name-only HEAD theme-abyssal/main -- public/ nodeget-theme.json scripts/verify-custom-patch.mjs 2>/dev/null || true)
           if [ -n "$CHANGED" ]; then
             echo "Theme files changed:"
             echo "$CHANGED"
             git checkout theme-abyssal/main -- public/custom.css public/custom.js public/logo.png 2>/dev/null || true
             git checkout theme-abyssal/main -- public/assets/ 2>/dev/null || true
             git checkout theme-abyssal/main -- nodeget-theme.json 2>/dev/null || true
+            git checkout theme-abyssal/main -- scripts/verify-custom-patch.mjs 2>/dev/null || true
+            git add public/ nodeget-theme.json scripts/verify-custom-patch.mjs 2>/dev/null || true
+            git commit -m "🎨 Sync theme files from clavulin/nodeget-theme-abyssal" 2>/dev/null || true
             echo "theme_updated=true" >> "$GITHUB_OUTPUT"
           else
             echo "theme_updated=false" >> "$GITHUB_OUTPUT"
