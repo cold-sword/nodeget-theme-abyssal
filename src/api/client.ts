@@ -22,37 +22,22 @@ interface Pending {
 }
 
 export class RpcClient {
-  private url: string
-  private token: string
-  private name: string
+  readonly url: string
+  readonly token: string
+  readonly name: string
   private ws: WebSocket | null = null
   private pending = new Map<string, Pending>()
   private outbox: string[] = []
   private closed = false
-  opened: Promise<void>
 
   constructor(url: string, token: string, name?: string) {
     this.url = url
     this.token = token
     this.name = name || url
-
-    this.opened = new Promise<void>((resolve, reject) => {
-      let done = false
-      const ok = () => {
-        if (done) return
-        done = true
-        resolve()
-      }
-      const fail = (msg: string) => {
-        if (done) return
-        done = true
-        reject(new Error(msg))
-      }
-      this.connect(ok, fail)
-    })
+    this.connect()
   }
 
-  private connect(ok: () => void, fail: (msg: string) => void) {
+  private connect() {
     if (this.closed) return
     const t0 = performance.now()
     log(this.name, 'connecting →', this.url)
@@ -64,14 +49,13 @@ export class RpcClient {
     const timer = setTimeout(() => {
       if (opened) return
       ws.close()
-      fail(`连接 ${this.url} 超时`)
+      warn(this.name, `连接 ${this.url} 超时`)
     }, CONNECT_TIMEOUT_MS)
 
     ws.onopen = () => {
       opened = true
       clearTimeout(timer)
       log(this.name, `open in ${(performance.now() - t0).toFixed(0)}ms (flush ${this.outbox.length})`)
-      ok()
       for (const m of this.outbox) ws.send(m)
       this.outbox = []
     }
@@ -101,11 +85,10 @@ export class RpcClient {
       this.ws = null
       if (!opened) {
         warn(this.name, `close before open code=${ev.code}`)
-        fail(`无法连接 ${this.url}`)
       } else {
         log(this.name, `close code=${ev.code} pending=${this.pending.size}`)
       }
-      if (!this.closed) setTimeout(() => this.connect(ok, fail), RECONNECT_DELAY_MS)
+      if (!this.closed) setTimeout(() => this.connect(), RECONNECT_DELAY_MS)
     }
 
     ws.onerror = () => warn(this.name, 'ws error')
@@ -116,7 +99,6 @@ export class RpcClient {
     params: Record<string, unknown> = {},
     timeout = CALL_TIMEOUT_MS,
   ): Promise<T> {
-    await this.opened
     const id = nextId()
     const payload = JSON.stringify({
       jsonrpc: '2.0',
@@ -155,5 +137,36 @@ export class RpcClient {
     this.outbox = []
     this.ws?.close()
     this.ws = null
+  }
+}
+
+export async function httpRpcCall<T = unknown>(
+  wsUrl: string,
+  token: string,
+  method: string,
+  params: Record<string, unknown> = {},
+  timeout = CALL_TIMEOUT_MS,
+): Promise<T> {
+  const httpUrl = wsUrl.replace(/^wss:/, 'https:').replace(/^ws:/, 'http:')
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeout)
+  try {
+    const res = await fetch(httpUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        method,
+        params: { token, ...params },
+        id: 1,
+      }),
+      signal: controller.signal,
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const data = await res.json()
+    if (data.error) throw new Error(data.error.message || 'rpc error')
+    return data.result as T
+  } finally {
+    clearTimeout(timer)
   }
 }

@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { BackendPool } from '../api/pool'
-import { dynamicSummaryMulti, kvGetMulti, listAgentUuids, staticDataMulti } from '../api/methods'
+import { dynamicSummaryMulti } from '../api/methods'
+import { httpRpcCall } from '../api/client'
 import { isOnline } from '../utils/status'
-import type { DynamicSummary, HistorySample, Node, NodeMeta, SiteConfig } from '../types'
+import type { DynamicSummary, HistorySample, Node, NodeMeta, SiteConfig, StaticData } from '../types'
 
-type Agent = Pick<Node, 'uuid' | 'source' | 'meta' | 'static'>
+type Agent = Pick<Node, 'uuid' | 'source' | 'meta' | 'static' | 'trafficBaseline'>
 
 interface BackendError {
   source: string
@@ -49,9 +50,13 @@ const META_KEYS = [
   'metadata_price_unit',
   'metadata_price_cycle',
   'metadata_expire_time',
+  'metadata_traffic_limit_gb',
+  'metadata_traffic_price_per_gb',
+  'metadata_traffic_period',
+  'metadata_traffic_start_date',
 ]
 const DYN_INTERVAL_MS = 2000
-const HISTORY_LIMIT = 60
+const HISTORY_LIMIT = 300
 
 function emptyMeta(): NodeMeta {
   return {
@@ -67,6 +72,10 @@ function emptyMeta(): NodeMeta {
     priceUnit: '$',
     priceCycle: 30,
     expireTime: '',
+    trafficLimitGb: 0,
+    trafficPricePerGb: 0,
+    trafficPeriod: '1m',
+    trafficStartDate: '',
   }
 }
 
@@ -93,6 +102,27 @@ function parseMeta(raw: Record<string, unknown>): NodeMeta {
     priceUnit: raw.metadata_price_unit ? String(raw.metadata_price_unit) : '$',
     priceCycle: Number.isFinite(cycle) && cycle > 0 ? cycle : 30,
     expireTime: raw.metadata_expire_time ? String(raw.metadata_expire_time) : '',
+    trafficLimitGb: Number(raw.metadata_traffic_limit_gb) || 0,
+    trafficPricePerGb: Number(raw.metadata_traffic_price_per_gb) || 0,
+    trafficPeriod: raw.metadata_traffic_period ? String(raw.metadata_traffic_period) : '1m',
+    trafficStartDate: raw.metadata_traffic_start_date ? String(raw.metadata_traffic_start_date) : '',
+  }
+}
+
+function parseTrafficBaseline(raw: Record<string, unknown>): Node['trafficBaseline'] {
+  const v = raw.traffic_baseline
+  if (!v || typeof v !== 'object') return undefined
+  const o = v as Record<string, unknown>
+  const rx = Number(o.rx)
+  const tx = Number(o.tx)
+  const adjustRx = Number(o.adjust_rx)
+  const adjustTx = Number(o.adjust_tx)
+  if (!Number.isFinite(rx) || !Number.isFinite(tx)) return undefined
+  return {
+    rx,
+    tx,
+    adjustRx: Number.isFinite(adjustRx) ? adjustRx : 0,
+    adjustTx: Number.isFinite(adjustTx) ? adjustTx : 0,
   }
 }
 
@@ -126,16 +156,31 @@ export function useNodes(config: SiteConfig | null) {
       setLoading(false)
       return
     }
+    setLoading(true)
     const pool = new BackendPool(config.site_tokens)
     setPool(pool)
     const sourceUuids = new Map<string, string[]>()
 
     const bootstrap = async () => {
-      const agentsRes = await pool.fanout(listAgentUuids)
-      setErrors(prev => [...prev, ...agentsRes.errors])
+      // HTTP POST 复用页面已有 HTTPS 连接，省掉 WSS TLS 握手
+      const uuidList: { source: string; rows: string[] }[] = []
+      const uuidErrors: { source: string; error: unknown }[] = []
+      await Promise.allSettled(
+        pool.entries.map(async entry => {
+          try {
+            const res = await httpRpcCall<{ uuids?: string[] }>(
+              entry.client.url, entry.client.token, 'nodeget-server_list_all_agent_uuid', {},
+            )
+            uuidList.push({ source: entry.name, rows: res?.uuids || [] })
+          } catch (e) {
+            uuidErrors.push({ source: entry.name, error: e })
+          }
+        }),
+      )
+      setErrors(prev => [...prev, ...uuidErrors])
 
       const seed = new Map<string, Agent>()
-      for (const { source, rows } of agentsRes.ok) {
+      for (const { source, rows } of uuidList) {
         const uuids = rows ?? []
         sourceUuids.set(source, uuids)
         for (const uuid of uuids) seed.set(uuid, blankAgent(uuid, source))
@@ -147,11 +192,30 @@ export function useNodes(config: SiteConfig | null) {
           const uuids = sourceUuids.get(entry.name) || []
           if (!uuids.length) return
 
+          const { url, token, name } = entry.client
           const kvItems = uuids.flatMap(u => META_KEYS.map(k => ({ namespace: u, key: k })))
-          const [meta, stat] = await Promise.allSettled([
-            kvGetMulti(entry.client, kvItems),
-            staticDataMulti(entry.client, uuids, STATIC_FIELDS),
+          const baselineItems = uuids.map(u => ({ namespace: u, key: 'traffic_baseline' }))
+          const [meta, stat, dyn, baseline] = await Promise.allSettled([
+            httpRpcCall<{ namespace: string; key: string; value: unknown }[]>(
+              url, token, 'kv_get_multi_value', { namespace_key: kvItems },
+            ),
+            httpRpcCall<StaticData[]>(
+              url, token, 'agent_static_data_multi_last_query', { uuids, fields: STATIC_FIELDS },
+            ),
+            httpRpcCall<DynamicSummary[]>(
+              url, token, 'agent_dynamic_summary_multi_last_query', { uuids, fields: DYNAMIC_FIELDS },
+            ),
+            httpRpcCall<{ namespace: string; key: string; value: unknown }[]>(
+              url, token, 'kv_get_multi_value', { namespace_key: baselineItems },
+            ),
           ])
+
+          const batchErrors: BackendError[] = []
+          if (meta.status === 'rejected') batchErrors.push({ source: `${name}/kv`, error: meta.reason })
+          if (stat.status === 'rejected') batchErrors.push({ source: `${name}/static`, error: stat.reason })
+          if (dyn.status === 'rejected') batchErrors.push({ source: `${name}/dynamic`, error: dyn.reason })
+          if (baseline.status === 'rejected') batchErrors.push({ source: `${name}/kv-baseline`, error: baseline.reason })
+          if (batchErrors.length) setErrors(prev => [...prev, ...batchErrors])
 
           setAgents(prev => {
             const next = new Map(prev)
@@ -165,25 +229,89 @@ export function useNodes(config: SiteConfig | null) {
                 bucket[row.key] = row.value
               }
               for (const uuid of uuids) {
-                const cur = next.get(uuid) ?? blankAgent(uuid, entry.name)
-                next.set(uuid, { ...cur, meta: parseMeta(grouped.get(uuid) ?? {}) })
+                const cur = next.get(uuid) ?? blankAgent(uuid, name)
+                const raw = grouped.get(uuid) ?? {}
+                next.set(uuid, { ...cur, meta: parseMeta(raw) })
+              }
+            }
+
+            if (baseline.status === 'fulfilled' && baseline.value) {
+              const grouped = new Map<string, Record<string, unknown>>()
+              for (const row of baseline.value) {
+                if (!row || row.value == null) continue
+                grouped.set(row.namespace, { traffic_baseline: row.value })
+              }
+              for (const uuid of uuids) {
+                const cur = next.get(uuid) ?? blankAgent(uuid, name)
+                next.set(uuid, { ...cur, trafficBaseline: parseTrafficBaseline(grouped.get(uuid) ?? {}) })
               }
             }
 
             if (stat.status === 'fulfilled' && stat.value) {
               for (const row of stat.value) {
                 if (!row.uuid) continue
-                const cur = next.get(row.uuid) ?? blankAgent(row.uuid, entry.name)
+                const cur = next.get(row.uuid) ?? blankAgent(row.uuid, name)
                 next.set(row.uuid, { ...cur, static: row })
               }
             }
             return next
           })
+
+          if (dyn.status === 'fulfilled' && dyn.value) {
+            setLive(prev => {
+              const next = new Map(prev)
+              for (const row of dyn.value) next.set(row.uuid, row)
+              return next
+            })
+            setHistory(prev => {
+              const next = new Map(prev)
+              for (const row of dyn.value) {
+                const arr = next.get(row.uuid) || []
+                const sample = sampleFrom(row)
+                const dedup = arr.length && arr[arr.length - 1].t === sample.t ? arr : arr.concat(sample)
+                next.set(row.uuid, dedup.slice(-HISTORY_LIMIT))
+              }
+              return next
+            })
+          }
         }),
       )
 
-      await tickDynamic()
       setLoading(false)
+
+      // 后台静默回填历史数据
+      const histFrom = Date.now() - 60_000
+      const histTo = Date.now()
+      pool.entries.forEach(async entry => {
+        const uuids = sourceUuids.get(entry.name) || []
+        const { url, token } = entry.client
+        await Promise.allSettled(
+          uuids.map(async uuid => {
+            try {
+              const rows = await httpRpcCall<DynamicSummary[]>(
+                url, token, 'agent_query_dynamic_summary', {
+                  query: {
+                    fields: DYNAMIC_FIELDS,
+                    condition: [{ uuid }, { timestamp_from_to: [histFrom, histTo] }],
+                  },
+                },
+              )
+              if (!rows?.length) return
+              setHistory(prev => {
+                const next = new Map(prev)
+                let arr = next.get(uuid) || []
+                for (const row of rows) {
+                  const s = sampleFrom(row)
+                  if (!arr.length || arr[arr.length - 1].t !== s.t) arr.push(s)
+                }
+                arr.sort((a, b) => a.t - b.t)
+                next.set(uuid, arr.slice(-HISTORY_LIMIT))
+                return next
+              })
+            } catch {}
+          }),
+        )
+      })
     }
 
     const tickDynamic = async () => {
