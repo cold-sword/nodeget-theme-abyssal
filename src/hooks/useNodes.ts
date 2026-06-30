@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { BackendPool } from '../api/pool'
 import { dynamicSummaryMulti } from '../api/methods'
 import { httpRpcCall } from '../api/client'
+import type { RpcClient } from '../api/client'
 import { isOnline } from '../utils/status'
 import type { DynamicSummary, HistorySample, Node, NodeMeta, SiteConfig, StaticData } from '../types'
 
@@ -142,6 +143,28 @@ function sampleFrom(row: DynamicSummary): HistorySample {
   }
 }
 
+/**
+ * Try HTTP POST JSON-RPC first (fast, reuses existing HTTPS connection).
+ * On CORS/network failure, fall back to WebSocket client.call().
+ */
+async function httpFirst<T>(
+  client: RpcClient,
+  method: string,
+  params: Record<string, unknown> = {},
+  timeout?: number,
+): Promise<T> {
+  try {
+    return await httpRpcCall<T>(client.url, client.token, method, params, timeout)
+  } catch (e) {
+    // CORS failure or network error → fall back to WebSocket
+    if (e instanceof TypeError || (e instanceof Error && e.message === 'Failed to fetch')) {
+      if (import.meta.env.DEV) console.debug(`[httpRpc] ${method} → fallback to WS for ${client.name}`)
+      return client.call<T>(method, params, timeout)
+    }
+    throw e
+  }
+}
+
 export function useNodes(config: SiteConfig | null) {
   const [agents, setAgents] = useState<Map<string, Agent>>(new Map())
   const [live, setLive] = useState<Map<string, DynamicSummary>>(new Map())
@@ -162,14 +185,14 @@ export function useNodes(config: SiteConfig | null) {
     const sourceUuids = new Map<string, string[]>()
 
     const bootstrap = async () => {
-      // HTTP POST 复用页面已有 HTTPS 连接，省掉 WSS TLS 握手
+      // Stage 1: fetch all agent UUIDs (HTTP-first, WS fallback)
       const uuidList: { source: string; rows: string[] }[] = []
       const uuidErrors: { source: string; error: unknown }[] = []
       await Promise.allSettled(
         pool.entries.map(async entry => {
           try {
-            const res = await httpRpcCall<{ uuids?: string[] }>(
-              entry.client.url, entry.client.token, 'nodeget-server_list_all_agent_uuid', {},
+            const res = await httpFirst<{ uuids?: string[] }>(
+              entry.client, 'nodeget-server_list_all_agent_uuid', {},
             )
             uuidList.push({ source: entry.name, rows: res?.uuids || [] })
           } catch (e) {
@@ -187,6 +210,7 @@ export function useNodes(config: SiteConfig | null) {
       }
       setAgents(seed)
 
+      // Stage 2: fetch kv, static, dynamic, baseline in parallel per backend (HTTP-first, WS fallback)
       await Promise.all(
         pool.entries.map(async entry => {
           const uuids = sourceUuids.get(entry.name) || []
@@ -196,17 +220,17 @@ export function useNodes(config: SiteConfig | null) {
           const kvItems = uuids.flatMap(u => META_KEYS.map(k => ({ namespace: u, key: k })))
           const baselineItems = uuids.map(u => ({ namespace: u, key: 'traffic_baseline' }))
           const [meta, stat, dyn, baseline] = await Promise.allSettled([
-            httpRpcCall<{ namespace: string; key: string; value: unknown }[]>(
-              url, token, 'kv_get_multi_value', { namespace_key: kvItems },
+            httpFirst<{ namespace: string; key: string; value: unknown }[]>(
+              entry.client, 'kv_get_multi_value', { namespace_key: kvItems },
             ),
-            httpRpcCall<StaticData[]>(
-              url, token, 'agent_static_data_multi_last_query', { uuids, fields: STATIC_FIELDS },
+            httpFirst<StaticData[]>(
+              entry.client, 'agent_static_data_multi_last_query', { uuids, fields: STATIC_FIELDS },
             ),
-            httpRpcCall<DynamicSummary[]>(
-              url, token, 'agent_dynamic_summary_multi_last_query', { uuids, fields: DYNAMIC_FIELDS },
+            httpFirst<DynamicSummary[]>(
+              entry.client, 'agent_dynamic_summary_multi_last_query', { uuids, fields: DYNAMIC_FIELDS },
             ),
-            httpRpcCall<{ namespace: string; key: string; value: unknown }[]>(
-              url, token, 'kv_get_multi_value', { namespace_key: baselineItems },
+            httpFirst<{ namespace: string; key: string; value: unknown }[]>(
+              entry.client, 'kv_get_multi_value', { namespace_key: baselineItems },
             ),
           ])
 
@@ -279,7 +303,7 @@ export function useNodes(config: SiteConfig | null) {
 
       setLoading(false)
 
-      // 后台静默回填历史数据
+      // Background: backfill last 1m of history via HTTP (best-effort, non-blocking)
       const histFrom = Date.now() - 60_000
       const histTo = Date.now()
       pool.entries.forEach(async entry => {
@@ -288,8 +312,8 @@ export function useNodes(config: SiteConfig | null) {
         await Promise.allSettled(
           uuids.map(async uuid => {
             try {
-              const rows = await httpRpcCall<DynamicSummary[]>(
-                url, token, 'agent_query_dynamic_summary', {
+              const rows = await httpFirst<DynamicSummary[]>(
+                entry.client, 'agent_query_dynamic_summary', {
                   query: {
                     fields: DYNAMIC_FIELDS,
                     condition: [{ uuid }, { timestamp_from_to: [histFrom, histTo] }],

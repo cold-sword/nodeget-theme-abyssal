@@ -140,6 +140,13 @@ export class RpcClient {
   }
 }
 
+/**
+ * HTTP JSON-RPC call — reuses the page's existing HTTPS connection,
+ * avoiding an extra WSS TLS handshake. Much faster for first paint.
+ *
+ * Falls back to WebSocket RpcClient.call() when CORS blocks the request
+ * (browsers block cross-origin fetch if the backend lacks CORS headers).
+ */
 export async function httpRpcCall<T = unknown>(
   wsUrl: string,
   token: string,
