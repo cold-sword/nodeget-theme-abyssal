@@ -238,7 +238,7 @@ export function useNodes(config: SiteConfig | null) {
           if (meta.status === 'rejected') batchErrors.push({ source: `${name}/kv`, error: meta.reason })
           if (stat.status === 'rejected') batchErrors.push({ source: `${name}/static`, error: stat.reason })
           if (dyn.status === 'rejected') batchErrors.push({ source: `${name}/dynamic`, error: dyn.reason })
-          if (baseline.status === 'rejected') batchErrors.push({ source: `${name}/kv-baseline`, error: baseline.reason })
+          // baseline is optional — don't surface to user if the server rejects it
           if (batchErrors.length) setErrors(prev => [...prev, ...batchErrors])
 
           setAgents(prev => {
