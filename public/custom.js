@@ -48,20 +48,6 @@
   const LATENCY_INCREMENTAL_OVERLAP_MS = 2 * 60 * 1000
   const LATENCY_QUERY_TIMEOUT_MS = 18 * 1000
   const LATENCY_QUERY_LIMIT_DEFAULT = 20000
-  const LATENCY_TARGET_ORDER = [
-    '北京电信',
-    '北京联通',
-    '北京移动',
-    '上海电信',
-    '上海联通',
-    '上海移动',
-    '广东电信',
-    '广东联通',
-    '广东移动',
-  ]
-  const LATENCY_TARGET_ORDER_INDEX = new Map(LATENCY_TARGET_ORDER.map(function (name, index) {
-    return [name, index]
-  }))
 
   // Cap the rows a 24h latency task_query may request so the result set stays
   // bounded. A deployment with stricter backend query limits can lower this via
@@ -74,6 +60,17 @@
       : LATENCY_QUERY_LIMIT_DEFAULT
   }
 
+  // Order latency probe legends by a deployment-registered list so a known set
+  // of probe targets renders in a meaningful, stable order. The public theme
+  // ships no specific targets; a deployment registers its own ordering via
+  // window.NODEGET_LATENCY_TARGET_ORDER (an array of normalized target names),
+  // read lazily so the theme stays agnostic to any backend topology. Targets
+  // not in the list fall back to the lexicographic order in compareLatencyTargets.
+  function latencyTargetOrder() {
+    const override = window.NODEGET_LATENCY_TARGET_ORDER
+    return Array.isArray(override) ? override : []
+  }
+
   function normalizeLatencyTargetName(value) {
     return String(value || '')
       .trim()
@@ -83,7 +80,8 @@
 
   function latencyTargetOrderIndex(value) {
     const normalized = normalizeLatencyTargetName(value)
-    return LATENCY_TARGET_ORDER_INDEX.has(normalized) ? LATENCY_TARGET_ORDER_INDEX.get(normalized) : Infinity
+    const index = latencyTargetOrder().indexOf(normalized)
+    return index === -1 ? Infinity : index
   }
 
   function compareLatencyTargets(aName, bName, aAddress, bAddress) {
@@ -773,18 +771,10 @@
     [/运行时长/g, 'UPTIME'],
     [/平均延迟/g, 'AVG LATENCY'],
     [/丢包率/g, 'LOSS'],
-    [/广州联通/g, 'GUANGZHOU UNICOM'],
-    [/广州电信/g, 'GUANGZHOU TELECOM'],
-    [/广州移动/g, 'GUANGZHOU MOBILE'],
-    [/广东联通/g, 'GUANGDONG UNICOM'],
-    [/广东电信/g, 'GUANGDONG TELECOM'],
-    [/广东移动/g, 'GUANGDONG MOBILE'],
-    [/上海联通/g, 'SHANGHAI UNICOM'],
-    [/上海电信/g, 'SHANGHAI TELECOM'],
-    [/上海移动/g, 'SHANGHAI MOBILE'],
-    [/北京联通/g, 'BEIJING UNICOM'],
-    [/北京电信/g, 'BEIJING TELECOM'],
-    [/北京移动/g, 'BEIJING MOBILE'],
+    // Deployment-specific probe location names (region + ISP) are not built in.
+    // A deployment registers their English labels via window.NODEGET_EXTRA_TRANSLATIONS
+    // (applied after these specific rules and before GENERIC_TRANSLATIONS) so the
+    // theme stays agnostic to any backend's probe topology.
   ]
 
   const GENERIC_TRANSLATIONS = [
@@ -853,19 +843,52 @@
     [/前/g, 'AGO'],
   ]
 
-  const CARD_PREVIEW_TRANSLATIONS = [
+  const CARD_PREVIEW_SPECIFIC_TRANSLATIONS = [
     ...SHELL_TRANSLATIONS,
     ...METRIC_TRANSLATIONS,
     ...DETAIL_TRANSLATIONS,
     ...PROBE_TRANSLATIONS,
-    ...GENERIC_TRANSLATIONS,
   ]
+
+  // Deployment-registered translations (e.g. probe location names) merge in here,
+  // after the built-in specific rules and before the generic catch-all rules, so
+  // the deployment-specific label set stays out of the theme. Entries are
+  // [pattern, replacement] pairs with pattern a RegExp or a literal string; read
+  // lazily and memoized by array identity so script registration order is moot.
+  let extraTranslationsSource = null
+  let extraTranslationsCompiled = []
+  function extraTranslations() {
+    const raw = window.NODEGET_EXTRA_TRANSLATIONS
+    if (!Array.isArray(raw)) {
+      extraTranslationsSource = null
+      extraTranslationsCompiled = []
+      return extraTranslationsCompiled
+    }
+    if (raw === extraTranslationsSource) return extraTranslationsCompiled
+    extraTranslationsSource = raw
+    extraTranslationsCompiled = raw
+      .filter(function (entry) {
+        return Array.isArray(entry) && entry.length >= 2
+      })
+      .map(function (entry) {
+        // Detect RegExp via toString so a pattern created in another realm
+        // (e.g. a deployment script) is still recognized; instanceof would miss it.
+        const pattern = Object.prototype.toString.call(entry[0]) === '[object RegExp]'
+          ? entry[0]
+          : new RegExp(String(entry[0]).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')
+        return [pattern, String(entry[1])]
+      })
+    return extraTranslationsCompiled
+  }
 
   function translateCardText(text) {
     let output = String(text || '')
-    CARD_PREVIEW_TRANSLATIONS.forEach(function (entry) {
+    const apply = function (entry) {
       output = output.replace(entry[0], entry[1])
-    })
+    }
+    CARD_PREVIEW_SPECIFIC_TRANSLATIONS.forEach(apply)
+    extraTranslations().forEach(apply)
+    GENERIC_TRANSLATIONS.forEach(apply)
     output = output.replace(/\bB\/S\b/g, 'B/s')
     output = output.replace(/(SEC|MIN|H|D)(?=TREND)/g, '$1 ')
     output = output.replace(/\s+\/\s+/g, ' / ')
