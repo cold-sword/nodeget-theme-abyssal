@@ -184,7 +184,7 @@ const translationCases = [
   ['upload speed metric', '上行 速度', 'UP SPEED'],
   ['tcp ping empty data', '暂无 tcp_ping 数据', 'No tcp_ping data'],
   ['ping empty data current behavior', '暂无 ping 数据', 'No ping data'],
-  ['probe latency and loss labels', 'ping-广州联通 平均延迟 丢包率', 'GUANGZHOU UNICOM AVG LATENCY LOSS'],
+  ['probe latency and loss labels', 'ping-平均延迟 丢包率', 'AVG LATENCY LOSS'],
   ['network load heading', '网络与负载', 'NETWORK / LOAD'],
   ['system detail labels', '操作系统 CPU 型号 数据更新', 'OS CPU MODEL DATA UPDATED'],
   ['close details action', '关闭详情', 'CLOSE DETAILS'],
@@ -198,6 +198,32 @@ for (const [name, input, expected] of translationCases) {
     assert.equal(api.translateCardText(input), expected)
   })
 }
+
+test('translateCardText applies deployment labels via the NODEGET_EXTRA_TRANSLATIONS seam', () => {
+  // Deployment-specific probe location names are not built in; a deployment
+  // registers their English labels here, applied before the generic catch-alls.
+  const previous = window.NODEGET_EXTRA_TRANSLATIONS
+  window.NODEGET_EXTRA_TRANSLATIONS = [[/广州联通/g, 'GUANGZHOU UNICOM']]
+  try {
+    assert.equal(api.translateCardText('ping-广州联通 平均延迟 丢包率'), 'GUANGZHOU UNICOM AVG LATENCY LOSS')
+  } finally {
+    window.NODEGET_EXTRA_TRANSLATIONS = previous
+  }
+})
+
+test('translateCardText leaves deployment region names untranslated without the seam', () => {
+  const previous = window.NODEGET_EXTRA_TRANSLATIONS
+  delete window.NODEGET_EXTRA_TRANSLATIONS
+  try {
+    const output = api.translateCardText('ping-广州联通 平均延迟 丢包率')
+    // Generic probe labels still translate; the region name stays untranslated.
+    assert.ok(!output.includes('GUANGZHOU'), 'region name must not translate without the seam')
+    assert.ok(output.includes('广州联通'), 'region name should pass through verbatim')
+    assert.ok(output.includes('AVG LATENCY') && output.includes('LOSS'), 'generic probe labels stay public')
+  } finally {
+    window.NODEGET_EXTRA_TRANSLATIONS = previous
+  }
+})
 
 test('SORT menu marker remains absent', () => {
   assert.equal((customJs.match(/aria-haspopup="menu"/g) || []).length, 0, 'SORT menu CSS/JS marker should remain absent if SORT is long-term hidden')
@@ -255,6 +281,12 @@ test('critical custom.js patch-layer markers remain present', () => {
     // Extension seam: deployments with stricter backend query limits override
     // the latency row cap here, so the private value stays out of the theme.
     'NODEGET_LATENCY_QUERY_LIMIT',
+    // Extension seam: deployments register their latency legend order here so
+    // the deployment-specific probe list stays out of the theme.
+    'NODEGET_LATENCY_TARGET_ORDER',
+    // Extension seam: deployments register English labels for deployment-specific
+    // text (e.g. probe location names) here so that list stays out of the theme.
+    'NODEGET_EXTRA_TRANSLATIONS',
     'nodeget-provider-filter',
     'providerFilterButtonHtml',
   ]
@@ -277,6 +309,21 @@ test('private server-order code stays out while provider filter stays public', (
     '/flag/',
   ]) {
     assert.equal(customJs.includes(marker), false, `custom.js must not contain private marker: ${marker}`)
+  }
+
+  // Deployment-specific probe location names belong in the
+  // NODEGET_LATENCY_TARGET_ORDER / NODEGET_EXTRA_TRANSLATIONS seams and must
+  // never be hard-coded into the theme — neither the Chinese names nor their
+  // English transliterations. Enumerate the full region x ISP grid so a partial
+  // reintroduction (e.g. just one combo) cannot slip past this red-line guard.
+  const probeRegions = [['北京', 'BEIJING'], ['上海', 'SHANGHAI'], ['广东', 'GUANGDONG'], ['广州', 'GUANGZHOU']]
+  const probeIsps = [['电信', 'TELECOM'], ['联通', 'UNICOM'], ['移动', 'MOBILE']]
+  for (const [regionCn, regionEn] of probeRegions) {
+    for (const [ispCn, ispEn] of probeIsps) {
+      for (const marker of [regionCn + ispCn, `${regionEn} ${ispEn}`]) {
+        assert.equal(customJs.includes(marker), false, `custom.js must not contain private probe name: ${marker}`)
+      }
+    }
   }
 
   for (const marker of [
@@ -433,26 +480,63 @@ test('downsampleLatencyRows groups by 5-minute bucket and source', () => {
   assert.equal(downsampled[1].task_event_result.ping, 40)
 })
 
-test('downsampleLatencyRows orders known probe sources for legends', () => {
+test('downsampleLatencyRows orders probe sources by the registered legend seam', () => {
   const now = 1_700_100_000_000
   const bucketStart = Math.floor((now - HOUR) / (5 * MIN)) * (5 * MIN)
 
-  const downsampled = api.downsampleLatencyRows(
-    [
-      row({ task_id: 'gd-mobile', timestamp: bucketStart + MIN, cron_source: 'ping-广东移动', task_event_result: { ping: 90 } }),
-      row({ task_id: 'bj-telecom', timestamp: bucketStart + MIN, cron_source: '北京电信', task_event_result: { ping: 10 } }),
-      row({ task_id: 'sh-unicom', timestamp: bucketStart + MIN, cron_source: 'tcping-上海联通', task_event_result: { ping: 50 } }),
-      row({ task_id: 'bj-mobile', timestamp: bucketStart + MIN, cron_source: '北京移动', task_event_result: { ping: 30 } }),
-      row({ task_id: 'unknown', timestamp: bucketStart + MIN, cron_source: 'ZZZ', task_event_result: { ping: 100 } }),
-    ],
-    'ping',
-    now,
-  )
+  // The public theme ships no probe list; a deployment registers its legend
+  // order via window.NODEGET_LATENCY_TARGET_ORDER (normalized names without
+  // ping/tcping prefixes). Simulate that registration here.
+  const previousOrder = window.NODEGET_LATENCY_TARGET_ORDER
+  window.NODEGET_LATENCY_TARGET_ORDER = ['北京电信', '北京移动', '上海联通', '广东移动']
+  try {
+    const downsampled = api.downsampleLatencyRows(
+      [
+        row({ task_id: 'gd-mobile', timestamp: bucketStart + MIN, cron_source: 'ping-广东移动', task_event_result: { ping: 90 } }),
+        row({ task_id: 'bj-telecom', timestamp: bucketStart + MIN, cron_source: '北京电信', task_event_result: { ping: 10 } }),
+        row({ task_id: 'sh-unicom', timestamp: bucketStart + MIN, cron_source: 'tcping-上海联通', task_event_result: { ping: 50 } }),
+        row({ task_id: 'bj-mobile', timestamp: bucketStart + MIN, cron_source: '北京移动', task_event_result: { ping: 30 } }),
+        row({ task_id: 'unknown', timestamp: bucketStart + MIN, cron_source: 'ZZZ', task_event_result: { ping: 100 } }),
+      ],
+      'ping',
+      now,
+    )
 
-  assert.deepEqual(
-    Array.from(downsampled, (item) => item.cron_source),
-    ['北京电信', '北京移动', 'tcping-上海联通', 'ping-广东移动', 'ZZZ'],
-  )
+    assert.deepEqual(
+      Array.from(downsampled, (item) => item.cron_source),
+      ['北京电信', '北京移动', 'tcping-上海联通', 'ping-广东移动', 'ZZZ'],
+    )
+  } finally {
+    window.NODEGET_LATENCY_TARGET_ORDER = previousOrder
+  }
+})
+
+test('downsampleLatencyRows falls back to lexicographic order without the seam', () => {
+  const now = 1_700_100_000_000
+  const bucketStart = Math.floor((now - HOUR) / (5 * MIN)) * (5 * MIN)
+
+  // With no deployment order registered, the public default orders legends
+  // lexicographically by source so behavior stays stable and topology-agnostic.
+  const previousOrder = window.NODEGET_LATENCY_TARGET_ORDER
+  delete window.NODEGET_LATENCY_TARGET_ORDER
+  try {
+    const downsampled = api.downsampleLatencyRows(
+      [
+        row({ task_id: 'c', timestamp: bucketStart + MIN, cron_source: 'charlie', task_event_result: { ping: 30 } }),
+        row({ task_id: 'a', timestamp: bucketStart + MIN, cron_source: 'alpha', task_event_result: { ping: 10 } }),
+        row({ task_id: 'b', timestamp: bucketStart + MIN, cron_source: 'bravo', task_event_result: { ping: 20 } }),
+      ],
+      'ping',
+      now,
+    )
+
+    assert.deepEqual(
+      Array.from(downsampled, (item) => item.cron_source),
+      ['alpha', 'bravo', 'charlie'],
+    )
+  } finally {
+    window.NODEGET_LATENCY_TARGET_ORDER = previousOrder
+  }
 })
 
 test('downsampleLatencyRows ignores unknown source rows', () => {

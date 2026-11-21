@@ -980,6 +980,25 @@ html.nodeget-abyssal-theme .nodeget-card-footer-row {
   background: transparent !important;
 }
 
+html.nodeget-abyssal-theme .nodeget-card-footer-row > div,
+html.nodeget-abyssal-theme .nodeget-archive-card > div > div:nth-child(4) > div {
+  position: relative;
+  padding-left: 0.08rem;
+}
+
+html.nodeget-abyssal-theme .nodeget-card-footer-row > div::before,
+html.nodeget-abyssal-theme .nodeget-card-footer-row span::before,
+html.nodeget-abyssal-theme .nodeget-archive-card > div > div:nth-child(4) > div::before,
+html.nodeget-abyssal-theme .nodeget-archive-card > div > div:nth-child(4) span::before {
+  content: none !important;
+  display: none !important;
+}
+
+html.nodeget-abyssal-theme .nodeget-card-footer-row svg,
+html.nodeget-abyssal-theme .nodeget-archive-card > div > div:nth-child(4) svg {
+  flex: 0 0 auto;
+}
+
 html.nodeget-abyssal-theme .nodeget-archive-card > div > div:nth-child(5) {
   padding-block: 0 0.5rem;
 }
@@ -1832,12 +1851,8 @@ html.nodeget-abyssal-theme .nodeget-archive-card > div {
 
 html.nodeget-abyssal-theme .nodeget-archive-card:is(:focus-visible, :focus-within) > div {
   background-color: color-mix(in srgb, var(--nodeget-archive-panel-hover) 28%, transparent) !important;
-  background-image:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent 42%),
-    repeating-linear-gradient(0deg, var(--nodeget-archive-grain-wash) 0 1px, transparent 1px 1.72rem) !important;
-  box-shadow:
-    inset 0 0 0 1px var(--nodeget-archive-border-strong),
-    inset 0 1.54rem 0 color-mix(in srgb, var(--nodeget-archive-border) 22%, transparent) !important;
+  background-image: none !important;
+  box-shadow: inset 0 0 0 1px var(--nodeget-archive-border-strong) !important;
   outline-color: var(--nodeget-archive-border-strong);
 }
 
@@ -1849,12 +1864,8 @@ html.nodeget-abyssal-theme .nodeget-archive-card:is(:focus-visible, :focus-withi
 
 html.nodeget-abyssal-theme .nodeget-archive-card:hover > div {
   background-color: color-mix(in srgb, var(--nodeget-archive-panel-hover) 28%, transparent) !important;
-  background-image:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent 42%),
-    repeating-linear-gradient(0deg, var(--nodeget-archive-grain-wash) 0 1px, transparent 1px 1.72rem) !important;
-  box-shadow:
-    inset 0 0 0 1px var(--nodeget-archive-border-strong),
-    inset 0 1.54rem 0 color-mix(in srgb, var(--nodeget-archive-border) 22%, transparent) !important;
+  background-image: none !important;
+  box-shadow: inset 0 0 0 1px var(--nodeget-archive-border-strong) !important;
   outline-color: var(--nodeget-archive-border-strong);
 }
 
